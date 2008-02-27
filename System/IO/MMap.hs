@@ -31,7 +31,7 @@ mmapFilePtr filepath mode offsetsize = do
             size1 <- c_system_io_file_size handle
             size <- return (fromIntegral size1)
             offset <- return 0
-            ptr <- c_system_io_mmap_mmap handle offset (fromIntegral size1)
+            ptr <- c_system_io_mmap_mmap handle (fromIntegral $ fromEnum mode) offset (fromIntegral size1)
             print ptr
             when (ptr == nullPtr) $
                 error "c_system_io_mmap_mmap returned NULL"
@@ -72,7 +72,7 @@ mmapFileOpen filepath mode = do
 
 foreign import ccall unsafe "system_io_mmap_file_open" c_system_io_mmap_file_open :: CString -> CInt -> IO (Ptr ())
 foreign import ccall unsafe "&system_io_mmap_file_close" c_system_io_mmap_file_close :: FunPtr(Ptr () -> IO ())
-foreign import ccall unsafe "system_io_mmap_mmap" c_system_io_mmap_mmap :: Ptr () -> CLLong -> CInt -> IO (Ptr ())
+foreign import ccall unsafe "system_io_mmap_mmap" c_system_io_mmap_mmap :: Ptr () -> CInt -> CLLong -> CInt -> IO (Ptr ())
 foreign import ccall unsafe "system_io_mmap_munmap" c_system_io_mmap_munmap :: Ptr () -> CInt -> IO ()
 foreign import ccall unsafe "system_io_mmap_file_size" c_system_io_file_size :: Ptr () -> IO (CLLong)
 

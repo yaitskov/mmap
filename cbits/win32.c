@@ -19,10 +19,24 @@ void *system_io_mmap_file_open(const char *filepath, int mode)
     );
     */
     void *handle = NULL;
+    DWORD dwDesiredAccess;
     if( !filepath )
         return NULL;
+    switch(mode) {
+        case 0:
+            dwDesiredAccess = GENERIC_READ;
+            break;
+        case 1:
+            dwDesiredAccess = GENERIC_WRITE;
+            break;
+        case 2:
+            dwDesiredAccess = GENERIC_READ;
+            break;
+        default:
+            return NULL;
+    }
     handle = CreateFileA(filepath,
-                         GENERIC_READ|GENERIC_WRITE,
+                         dwDesiredAccess,
                          FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
                          NULL,
                          OPEN_EXISTING,
@@ -39,8 +53,8 @@ void system_io_mmap_file_close(void *handle)
     CloseHandle(handle);
 }
 
-//foreign import ccall unsafe "system_io_mmap_mmap" c_system_io_mmap_mmap :: Ptr () -> CLLong -> CInt -> IO (Ptr ())
-void *system_io_mmap_mmap(void *handle, long long offset, int size)
+//foreign import ccall unsafe "system_io_mmap_mmap" c_system_io_mmap_mmap :: Ptr () -> CInt -> CLLong -> CInt -> IO (Ptr ())
+void *system_io_mmap_mmap(void *handle, int mode, long long offset, int size)
 {
     /*
     HANDLE WINAPI CreateFileMapping(
@@ -61,12 +75,30 @@ void *system_io_mmap_mmap(void *handle, long long offset, int size)
     */
     HANDLE mapping;
     void *ptr = NULL;
-    mapping = CreateFileMapping(handle, NULL, PAGE_READWRITE, (DWORD) ((offset + size)>>32), (DWORD)(offset + size), NULL);
+    DWORD flProtect;
+    DWORD dwDesiredAccess;
+    switch(mode) {
+        case 0:
+            flProtect = PAGE_READONLY;
+            dwDesiredAccess = FILE_MAP_READ;
+            break;
+        case 1:
+            flProtect = PAGE_READWRITE;
+            dwDesiredAccess = FILE_MAP_WRITE;
+            break;
+        case 2:
+            flProtect = PAGE_WRITECOPY;
+            dwDesiredAccess = FILE_MAP_COPY;
+            break;
+        default:
+            return NULL;
+    }
+    mapping = CreateFileMapping(handle, NULL, flProtect, (DWORD) ((offset + size)>>32), (DWORD)(offset + size), NULL);
     if( !mapping ) {
       DWORD dw = GetLastError();
       fprintf(stderr,"CreateFileMapping %d\n",dw);
     }
-    ptr = MapViewOfFile(mapping,FILE_MAP_ALL_ACCESS, (DWORD)(offset>>32), (DWORD)(offset), size );
+    ptr = MapViewOfFile(mapping,dwDesiredAccess, (DWORD)(offset>>32), (DWORD)(offset), size );
     if( !ptr ) {
       DWORD dw = GetLastError();
       fprintf(stderr,"MapViewOfFile %d\n",dw);
