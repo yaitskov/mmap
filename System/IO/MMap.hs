@@ -18,25 +18,26 @@ import Data.ByteString
 data Mode = ReadOnly | ReadWrite | WriteCopy
     deriving (Eq,Ord,Enum)
 
-{-
-newtype Handle = Handle (ForeignPtr ())
--}
-
 mmapFilePtr :: FilePath -> Mode -> Maybe (Int64,Int) -> IO (Ptr (),IO (),Int)
 mmapFilePtr filepath mode offsetsize = do
     bracket (mmapFileOpen filepath mode)
             (finalizeForeignPtr) mmap
     where
-        mmap handle = withForeignPtr handle $ \handle -> do
-            size1 <- c_system_io_file_size handle
-            size <- return (fromIntegral size1)
-            offset <- return 0
-            ptr <- c_system_io_mmap_mmap handle (fromIntegral $ fromEnum mode) offset (fromIntegral size1)
-            print ptr
-            when (ptr == nullPtr) $
-                error "c_system_io_mmap_mmap returned NULL"
-            let finalizer = c_system_io_mmap_munmap ptr size
-            return (ptr,finalizer,fromIntegral size)
+        mmap handle = do
+            (offset,size) <- case offsetsize of
+                Just (offset,size) -> return (offset,size)
+                Nothing -> do
+                    longsize <- withForeignPtr handle c_system_io_file_size
+                    return (0,fromIntegral longsize)
+            withForeignPtr handle $ \handle -> do
+                let align = offset `mod` fromIntegral c_system_io_granularity
+                    offsetraw = offset - align
+                    sizeraw = size + fromIntegral align
+                ptr <- c_system_io_mmap_mmap handle (fromIntegral $ fromEnum mode) (fromIntegral offsetraw) (fromIntegral sizeraw)
+                when (ptr == nullPtr) $
+                    error "c_system_io_mmap_mmap returned NULL"
+                let finalizer = c_system_io_mmap_munmap ptr (fromIntegral size)
+                return (ptr `plusPtr` fromIntegral align,finalizer,fromIntegral size)
 
 mmapFileForeignPtr :: FilePath -> Mode -> Maybe (Int64,Int) -> IO (ForeignPtr (),Int)
 mmapFileForeignPtr filepath mode offsetsize = do
@@ -75,5 +76,6 @@ foreign import ccall unsafe "&system_io_mmap_file_close" c_system_io_mmap_file_c
 foreign import ccall unsafe "system_io_mmap_mmap" c_system_io_mmap_mmap :: Ptr () -> CInt -> CLLong -> CInt -> IO (Ptr ())
 foreign import ccall unsafe "system_io_mmap_munmap" c_system_io_mmap_munmap :: Ptr () -> CInt -> IO ()
 foreign import ccall unsafe "system_io_mmap_file_size" c_system_io_file_size :: Ptr () -> IO (CLLong)
+foreign import ccall unsafe "system_io_mmap_granularity" c_system_io_granularity :: CInt
 
 

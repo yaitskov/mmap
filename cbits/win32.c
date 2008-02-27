@@ -27,7 +27,7 @@ void *system_io_mmap_file_open(const char *filepath, int mode)
             dwDesiredAccess = GENERIC_READ;
             break;
         case 1:
-            dwDesiredAccess = GENERIC_WRITE;
+            dwDesiredAccess = GENERIC_WRITE|GENERIC_READ;
             break;
         case 2:
             dwDesiredAccess = GENERIC_READ;
@@ -119,4 +119,12 @@ long long system_io_mmap_file_size(void *handle)
     DWORD lobits, hibits;
     lobits = GetFileSize(handle,&hibits);
     return (long long)lobits + ((long long)hibits << 32);
+}
+
+//foreign import ccall unsafe "system_io_mmap_granularity" c_system_io_granularity :: CInt
+int system_io_mmap_granularity()
+{
+    SYSTEM_INFO sysinfo;
+    GetSystemInfo(&sysinfo);
+    return sysinfo.dwAllocationGranularity;
 }
