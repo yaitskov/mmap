@@ -3,13 +3,18 @@ Version: 0.1
 Stability: alpha
 License: BSD3
 License-File: LICENSE
-Copyright: 2007-2007, Gracjan Polak
+Copyright: 2008, Gracjan Polak
 Author: Gracjan Polak <gracjanpolak@gmail.com>
 Maintainer: Gracjan Polak <gracjanpolak@gmail.com>
 Synopsis: Memory mapping of files for POSIX and Windows
 Description:
+    This library provides a wrapper to mmap(2) or MapViewOfFile, allowing files or
+    devices to be lazily loaded into memory as strict or lazy
+    ByteStrings, ForeignPtrs or plain Ptrs, using the virtual memory subsystem to do on-demand
+    loading. Modifications are also supported.
 Cabal-version: >= 1.2
 Category: System
+Build-type: Simple
 
 Library
   Build-depends: base, bytestring
@@ -23,10 +28,3 @@ Library
   else
       C-sources: cbits/posix.c
 
-Executable SimpleMMap
-  Main-Is:         SimpleMMap.hs
-  Hs-Source-Dirs:  tests, .
-  if os(mingw32)
-      C-sources: cbits/win32.c
-  else
-      C-sources: cbits/posix.c

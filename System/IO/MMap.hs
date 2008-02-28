@@ -1,6 +1,16 @@
 {-# OPTIONS_GHC -fglasgow-exts #-}
 
-module System.IO.MMap where
+module System.IO.MMap 
+(
+     -- $mmap_intro
+     -- * Memory mapped files
+     mmapFilePtr,
+     mmapFileForeignPtr,
+     mmapFileByteString,
+     
+     Mode(..)
+)
+where
 
 import System.IO
 import Foreign.Ptr
@@ -15,10 +25,63 @@ import Control.Monad
 import Control.Exception
 import Data.ByteString
 
-data Mode = ReadOnly | ReadWrite | WriteCopy
+-- $mmap_intro
+--
+-- This module is an interface to mmap(2) system call under POSIX (Unix, Linux,
+-- Mac OS X) and CreateFileMapping MapViewOfFile under Windows.
+--
+-- We can consider mmap as lazy IO pushed into the virtual memory
+-- subsystem.
+--
+-- It is only safe to mmap a file if you know you are the sole user.
+--
+-- For more details about mmap, and its consequences, see:
+--
+-- * <http://opengroup.org/onlinepubs/009695399/functions/mmap.html>
+--
+-- * <http://www.gnu.org/software/libc/manual/html_node/Memory_002dmapped-I_002fO.html>
+--
+-- * <http://msdn2.microsoft.com/en-us/library/aa366781(VS.85).aspx>
+--
+
+-- | Mode of mapping. Three cases are supported.
+data Mode = ReadOnly      -- ^ file is mapped read-only
+          | ReadWrite     -- ^ file is mapped read-write
+          | WriteCopy     -- ^ file is mapped read-write, but changes aren't propagated to disk
     deriving (Eq,Ord,Enum)
 
-mmapFilePtr :: FilePath -> Mode -> Maybe (Int64,Int) -> IO (Ptr (),IO (),Int)
+-- | The 'mmapFilePtr' function maps a file or device into memory,
+-- returning a tripple containing pointer that accesses the mapped file,
+-- the finalizer to run to unmap region and size of mmaped memory.
+--
+-- If the mmap fails for some reason, an error is thrown.
+--
+-- Memory mapped files will behave as if they were read lazily --
+-- pages from the file will be loaded into memory on demand.
+--
+-- The storage manager is used to free the mapped memory. When
+-- the garbage collector notices there are no further references to the
+-- mapped memory, a call to munmap is made. It is not necessary to do
+-- this yourself. In tight memory situations, it may be profitable to
+-- use 'System.Mem.performGC' or 'finalizeForeignPtr' to force an unmap.
+--
+-- File must be created with correct attributes prior to mapping it
+-- into memory.
+--
+-- If mode is 'ReadWrite' or 'WriteCopy', the returned memory region may
+-- be written to with 'Foreign.Storable.poke' and friends.
+--
+-- Range specified may be 'Nothing', then whole file is maped. Otherwise
+-- range should be 'Just (offset,size)' where offsets is the beginning byte
+-- of file region to map and size tells its length. There are no alignment
+-- requirements.
+--
+-- If range to map extends beyon end of file, it will be resized accordingly.
+--
+mmapFilePtr :: FilePath                -- ^ name of file to mmap
+            -> Mode                    -- ^ access mode
+            -> Maybe (Int64,Int)       -- ^ range to map, maps whole file if Nothing
+            -> IO (Ptr a,IO (),Int)    -- ^ pointer, finalizer and size
 mmapFilePtr filepath mode offsetsize = do
     bracket (mmapFileOpen filepath mode)
             (finalizeForeignPtr) mmap
@@ -28,6 +91,8 @@ mmapFilePtr filepath mode offsetsize = do
                 Just (offset,size) -> return (offset,size)
                 Nothing -> do
                     longsize <- withForeignPtr handle c_system_io_file_size
+                    when (longsize > fromIntegral (maxBound :: Int)) $
+                         error ("file is longer (" ++ show longsize ++ ") then maxBound :: Int")
                     return (0,fromIntegral longsize)
             withForeignPtr handle $ \handle -> do
                 let align = offset `mod` fromIntegral c_system_io_granularity
@@ -39,29 +104,31 @@ mmapFilePtr filepath mode offsetsize = do
                 let finalizer = c_system_io_mmap_munmap ptr (fromIntegral sizeraw)
                 return (ptr `plusPtr` fromIntegral align,finalizer,fromIntegral size)
 
-mmapFileForeignPtr :: FilePath -> Mode -> Maybe (Int64,Int) -> IO (ForeignPtr (),Int)
+-- | Maps region of file and returns it as 'ForeignPtr'. See 'mmapFilePtr' for details.
+mmapFileForeignPtr :: FilePath                     -- ^ name of file to map
+                   -> Mode                         -- ^ access mode
+                   -> Maybe (Int64,Int)            -- ^ range to map, maps whole file if Nothing
+                   -> IO (ForeignPtr a,Int)        -- ^ foreign pointer to beginning of region and size
 mmapFileForeignPtr filepath mode offsetsize = do
     (ptr,finalizer,size) <- mmapFilePtr filepath mode offsetsize
     foreignptr <- Foreign.Concurrent.newForeignPtr ptr finalizer
     return (foreignptr,size)
 
 
-mmapFileByteString :: FilePath -> Maybe (Int64,Int) -> IO ByteString
+-- | Maps region of file and returns it as 'Data.ByteString.ByteString'.
+-- File is mapped in in 'ReadOnly' mode. See 'mmapFilePtr' for details
+--
+-- Note: this operation may break referential transparency! If
+-- any other process on the system changes the file when it is mapped
+-- into Haskell, the contents of your 'ByteString' will change.
+--
+mmapFileByteString :: FilePath                     -- ^ name of file to map
+                   -> Maybe (Int64,Int)            -- ^ range to map, maps whole file if Nothing
+                   -> IO ByteString                -- ^ bytestring with file content
 mmapFileByteString filepath offsetsize = do
     (ptr,finalizer,size) <- mmapFilePtr filepath ReadOnly offsetsize
-    bytestring <- unsafePackCStringFinalizer (castPtr ptr) size finalizer
+    bytestring <- unsafePackCStringFinalizer ptr size finalizer
     return bytestring
-
-{-
-mmapFileLazy :: FilePath -> Mode -> Int64 -> Int64 -> [(ForeignPtr (),Int)]
-mmapFileLazy filepath mode offset size = do
-    handle <- mmapFileOpen filepath mode
-    map (\(offset,size) -> unsafePerformIO (mmap handle offset size)) chunks
-    where
-        mmap handle offset size = do
-            ptr <- c_mmap handle offset size
-            newForeignPtrFinalizer ptr (c_unmap ptr size)
--}
 
 mmapFileOpen :: FilePath -> Mode -> IO (ForeignPtr ())
 mmapFileOpen filepath mode = do
