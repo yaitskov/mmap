@@ -36,7 +36,7 @@ mmapFilePtr filepath mode offsetsize = do
                 ptr <- c_system_io_mmap_mmap handle (fromIntegral $ fromEnum mode) (fromIntegral offsetraw) (fromIntegral sizeraw)
                 when (ptr == nullPtr) $
                     error "c_system_io_mmap_mmap returned NULL"
-                let finalizer = c_system_io_mmap_munmap ptr (fromIntegral size)
+                let finalizer = c_system_io_mmap_munmap ptr (fromIntegral sizeraw)
                 return (ptr `plusPtr` fromIntegral align,finalizer,fromIntegral size)
 
 mmapFileForeignPtr :: FilePath -> Mode -> Maybe (Int64,Int) -> IO (ForeignPtr (),Int)
