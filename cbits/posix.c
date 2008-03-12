@@ -1,8 +1,9 @@
 
 
+#define _LARGEFILE64_SOURCE1
+#define _FILE_OFFSET_BITS 64
 
 #include <sys/types.h>
-#include <stdio.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <fcntl.h>
@@ -31,7 +32,7 @@ void *system_io_mmap_file_open(const char *filepath, int mode)
     }
     handle = (void *)open(filepath,access|O_SHLOCK,0666);
     if( handle==(void*)(-1) ) {
-	fprintf(stderr,"open errno %d\n",errno);
+	//fprintf(stderr,"open errno %d\n",errno);
         return NULL;
     }
     return handle;
@@ -65,18 +66,17 @@ void *system_io_mmap_mmap(void *handle, int mode, long long offset, int size)
     default:
 	return NULL;
     }
-    
+
     struct stat st;
     fstat((int)handle,&st);
     if( st.st_size<offset+size) {
 	ftruncate((int)handle,offset+size);
     }
 
-    fprintf(stderr,"mapping %lld(%d)\n",offset,size);
     ptr = mmap(NULL,size,prot,flags,(int)handle,offset);
-    
+
     if( ptr == (void*)(-1)) {
-	fprintf(stderr,"mmap errno %d\n",errno);
+	//fprintf(stderr,"mmap errno %d\n",errno);
 	return NULL;
     }
     return ptr;
@@ -85,7 +85,6 @@ void *system_io_mmap_mmap(void *handle, int mode, long long offset, int size)
 //foreign import ccall unsafe "system_io_mmap_munmap" c_system_io_mmap_munmap :: Ptr () -> CInt -> IO ()
 void system_io_mmap_munmap(void *ptr,int size)
 {
-    fprintf(stderr,"munmap %8x %d\n",ptr,size);
     munmap(ptr,size);
 }
 
