@@ -20,17 +20,21 @@ void *system_io_mmap_file_open(const char *filepath, int mode)
     */
     void *handle = NULL;
     DWORD dwDesiredAccess;
+    DWORD dwCreationDisposition;
     if( !filepath )
         return NULL;
     switch(mode) {
         case 0:
             dwDesiredAccess = GENERIC_READ;
+            dwCreationDisposition = OPEN_ALWAYS;
             break;
         case 1:
             dwDesiredAccess = GENERIC_WRITE|GENERIC_READ;
+            dwCreationDisposition = CREATE_ALWAYS;
             break;
         case 2:
             dwDesiredAccess = GENERIC_READ;
+            dwCreationDisposition = OPEN_ALWAYS;
             break;
         default:
             return NULL;
@@ -39,7 +43,7 @@ void *system_io_mmap_file_open(const char *filepath, int mode)
                          dwDesiredAccess,
                          FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
                          NULL,
-                         OPEN_EXISTING,
+                         dwCreationDisposition,
                          FILE_ATTRIBUTE_NORMAL,
                          NULL);
     if( handle==INVALID_HANDLE_VALUE )

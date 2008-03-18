@@ -14,7 +14,7 @@ import Control.Concurrent
 import Control.Exception as E
 import Text.Printf
 import Control.Exception
-import System.CPUTime
+import System.CPUTime                                                          
 import System.Environment
 import System.IO
 import Data.ByteString.Internal

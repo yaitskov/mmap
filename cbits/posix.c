@@ -22,7 +22,7 @@ void *system_io_mmap_file_open(const char *filepath, int mode)
 	access = O_RDONLY;
 	break;
     case 1:
-	access = O_RDWR;
+	access = O_RDWR|O_CREAT;
 	break;
     case 2:
 	access = O_RDONLY;
@@ -30,7 +30,7 @@ void *system_io_mmap_file_open(const char *filepath, int mode)
     default:
 	return NULL;
     }
-    handle = (void *)open(filepath,access|O_SHLOCK,0666);
+    handle = (void *)open(filepath,access,0666);
     if( handle==(void*)(-1) ) {
 	//fprintf(stderr,"open errno %d\n",errno);
         return NULL;
