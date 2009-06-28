@@ -24,6 +24,7 @@ import Foreign.Ptr (Ptr,FunPtr,nullPtr,plusPtr)
 import Foreign.C.Types (CInt,CLLong)
 import Foreign.C.String (CString,withCString)
 import Foreign.ForeignPtr (ForeignPtr,withForeignPtr,finalizeForeignPtr,newForeignPtr)
+import Foreign.C.Error ( throwErrno )
 import Foreign.Concurrent (newForeignPtr)
 import System.IO.Unsafe  (unsafePerformIO)
 import qualified Data.ByteString.Unsafe as BS (unsafePackCStringFinalizer)
@@ -100,7 +101,7 @@ mmapFilePtr filepath mode offsetsize = do
                 Nothing -> do
                     longsize <- withForeignPtr handle c_system_io_file_size
                     when (longsize > fromIntegral (maxBound :: Int)) $
-                         error ("file is longer (" ++ show longsize ++ ") than maxBound::Int")
+                         fail ("file is longer (" ++ show longsize ++ ") than maxBound::Int")
                     return (0,fromIntegral longsize)
             withForeignPtr handle $ \handle -> do
                 let align = offset `mod` fromIntegral c_system_io_granularity
@@ -108,7 +109,7 @@ mmapFilePtr filepath mode offsetsize = do
                     sizeraw = size + fromIntegral align
                 ptr <- c_system_io_mmap_mmap handle (fromIntegral $ fromEnum mode) (fromIntegral offsetraw) (fromIntegral sizeraw)
                 when (ptr == nullPtr) $
-                    error "c_system_io_mmap_mmap returned NULL"
+                      throwErrno $ "mmap of '" ++ filepath ++ "' failed"
                 let finalizer = c_system_io_mmap_munmap ptr (fromIntegral sizeraw)
                 return (ptr `plusPtr` fromIntegral align,finalizer,fromIntegral size)
 
@@ -188,7 +189,7 @@ mmapFilePtrLazy filepath mode offsetsize = do
                     sizeraw = size + fromIntegral align
                 ptr <- c_system_io_mmap_mmap handle (fromIntegral $ fromEnum mode) (fromIntegral offsetraw) (fromIntegral sizeraw)
                 when (ptr == nullPtr) $
-                    error "c_system_io_mmap_mmap returned NULL"
+                     throwErrno $ "mmap of '" ++ filepath ++ "' failed"
                 let finalizer = c_system_io_mmap_munmap ptr (fromIntegral sizeraw)
                 return (ptr `plusPtr` fromIntegral align,finalizer,fromIntegral size)
 
@@ -238,7 +239,7 @@ mmapFileOpen :: FilePath -> Mode -> IO (ForeignPtr ())
 mmapFileOpen filepath mode = do
     ptr <- withCString filepath $ \filepath -> c_system_io_mmap_file_open filepath (fromIntegral $ fromEnum mode)
     when (ptr == nullPtr) $
-        error "c_system_io_mmap_file_open returned NULL"
+        throwErrno $ "mmap of '" ++ filepath ++ "' failed"
     handle <- Foreign.ForeignPtr.newForeignPtr c_system_io_mmap_file_close ptr
     return handle
 
