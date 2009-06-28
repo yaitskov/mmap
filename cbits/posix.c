@@ -14,7 +14,7 @@
 void *system_io_mmap_file_open(const char *filepath, int mode)
 {
     void *handle = NULL;
-    int access;
+    int access, fd;
     if( !filepath )
         return NULL;
     switch(mode) {
@@ -30,9 +30,9 @@ void *system_io_mmap_file_open(const char *filepath, int mode)
     default:
 	return NULL;
     }
-    handle = (void *)open(filepath,access,0666);
-    if( handle==(void*)(-1) ) {
-	//fprintf(stderr,"open errno %d\n",errno);
+    fd = open(filepath,access,0666);
+    handle = (void *)fd + 1;
+    if( fd == -1 ) {
         return NULL;
     }
     return handle;
@@ -41,7 +41,8 @@ void *system_io_mmap_file_open(const char *filepath, int mode)
 //foreign import ccall unsafe "system_io_mmap_file_close" c_system_io_mmap_file_close :: FunPtr(Ptr () -> IO ())
 void system_io_mmap_file_close(void *handle)
 {
-    close((int)handle);
+    int fd = (int)handle - 1;
+    close(fd);
 }
 
 //foreign import ccall unsafe "system_io_mmap_mmap" c_system_io_mmap_mmap :: Ptr () -> CInt -> CLLong -> CInt -> IO (Ptr ())
@@ -50,6 +51,7 @@ void *system_io_mmap_mmap(void *handle, int mode, long long offset, int size)
     void *ptr = NULL;
     int prot;
     int flags;
+    int fd = (int)handle - 1;
     switch(mode) {
     case 0:
 	prot = PROT_READ;
@@ -68,15 +70,14 @@ void *system_io_mmap_mmap(void *handle, int mode, long long offset, int size)
     }
 
     struct stat st;
-    fstat((int)handle,&st);
+    fstat(fd,&st);
     if( st.st_size<offset+size) {
-	ftruncate((int)handle,offset+size);
+	ftruncate(fd,offset+size);
     }
 
-    ptr = mmap(NULL,size,prot,flags,(int)handle,offset);
+    ptr = mmap(NULL,size,prot,flags,fd,offset);
 
-    if( ptr == (void*)(-1)) {
-	//fprintf(stderr,"mmap errno %d\n",errno);
+    if( ptr == MAP_FAILED ) {
 	return NULL;
     }
     return ptr;
@@ -91,8 +92,9 @@ void system_io_mmap_munmap(void *ptr,int size)
 //foreign import ccall unsafe "system_io_mmap_file_size" c_system_io_file_size :: Ptr () -> IO (CLLong)
 long long system_io_mmap_file_size(void *handle)
 {
+    int fd = (int)handle - 1;
     struct stat st;
-    fstat((int)handle,&st);
+    fstat(fd,&st);
     return st.st_size;
 }
 
