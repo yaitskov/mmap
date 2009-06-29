@@ -22,8 +22,7 @@ Library
   Extensions: ForeignFunctionInterface
   Exposed-modules: System.IO.MMap
   Hs-source-dirs: .
-  Ghc-options: -O2
-  CC-options: -O2 -Wall
+  CC-options: -Wall
   if os(mingw32)
       C-sources: cbits/win32.c
   else
