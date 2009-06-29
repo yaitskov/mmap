@@ -18,7 +18,7 @@ Category: System
 Build-type: Simple
 
 Library
-  Build-depends: base, bytestring
+  Build-depends: base<5, bytestring
   Extensions: ForeignFunctionInterface
   Exposed-modules: System.IO.MMap
   Hs-source-dirs: .
