@@ -30,7 +30,7 @@ void *system_io_mmap_file_open(const char *filepath, int mode)
             break;
         case 1:
             dwDesiredAccess = GENERIC_WRITE|GENERIC_READ;
-            dwCreationDisposition = CREATE_ALWAYS;
+            dwCreationDisposition = OPEN_ALWAYS;
             break;
         case 2:
             dwDesiredAccess = GENERIC_READ;
