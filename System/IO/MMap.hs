@@ -23,9 +23,11 @@ import System.IO ()
 import Foreign.Ptr (Ptr,FunPtr,nullPtr,plusPtr)
 import Foreign.C.Types (CInt,CLLong)
 import Foreign.C.String (CString,withCString)
-import Foreign.ForeignPtr (ForeignPtr,withForeignPtr,finalizeForeignPtr,newForeignPtr)
+import Foreign.ForeignPtr (ForeignPtr,withForeignPtr,finalizeForeignPtr,newForeignPtr,newForeignPtrEnv)
+import Foreign.Storable( poke )
+import Foreign.Marshal.Alloc( malloc )
 import Foreign.C.Error ( throwErrno )
-import Foreign.Concurrent (newForeignPtr)
+import qualified Foreign.Concurrent( newForeignPtr )
 import System.IO.Unsafe  (unsafePerformIO)
 import qualified Data.ByteString.Unsafe as BS (unsafePackCStringFinalizer)
 import Data.Int (Int64)
@@ -91,7 +93,29 @@ mmapFilePtr :: FilePath                -- ^ name of file to mmap
             -> Mode                    -- ^ access mode
             -> Maybe (Int64,Int)       -- ^ range to map, maps whole file if Nothing
             -> IO (Ptr a,IO (),Int)    -- ^ pointer, finalizer and size
-mmapFilePtr filepath mode offsetsize = do
+mmapFilePtr fp m range = do
+  (ptr, size) <- mmapFilePtr' fp m range
+  sizeptr <- malloc
+  poke sizeptr (fromIntegral size)
+  return (ptr, c_system_io_mmap_munmap sizeptr ptr, size)
+
+-- | Maps region of file and returns it as 'ForeignPtr'. See 'mmapFilePtr' for details.
+mmapFileForeignPtr :: FilePath                     -- ^ name of file to map
+                   -> Mode                         -- ^ access mode
+                   -> Maybe (Int64,Int)            -- ^ range to map, maps whole file if Nothing
+                   -> IO (ForeignPtr a,Int)        -- ^ foreign pointer to beginning of region and size
+mmapFileForeignPtr fp m range = do
+  (ptr, size) <- mmapFilePtr' fp m range
+  sizeptr <- malloc
+  poke sizeptr (fromIntegral size)
+  foreignptr <- newForeignPtrEnv c_system_io_mmap_munmap_funptr sizeptr ptr
+  return (foreignptr,size)
+
+mmapFilePtr' :: FilePath                -- ^ name of file to mmap
+             -> Mode                    -- ^ access mode
+             -> Maybe (Int64,Int)       -- ^ range to map, maps whole file if Nothing
+             -> IO (Ptr a,Int)          -- ^ pointer and size
+mmapFilePtr' filepath mode offsetsize = do
     bracket (mmapFileOpen filepath mode)
             (finalizeForeignPtr) mmap
     where
@@ -110,19 +134,7 @@ mmapFilePtr filepath mode offsetsize = do
                 ptr <- c_system_io_mmap_mmap handle (fromIntegral $ fromEnum mode) (fromIntegral offsetraw) (fromIntegral sizeraw)
                 when (ptr == nullPtr) $
                       throwErrno $ "mmap of '" ++ filepath ++ "' failed"
-                let finalizer = c_system_io_mmap_munmap ptr (fromIntegral sizeraw)
-                return (ptr `plusPtr` fromIntegral align,finalizer,fromIntegral size)
-
--- | Maps region of file and returns it as 'ForeignPtr'. See 'mmapFilePtr' for details.
-mmapFileForeignPtr :: FilePath                     -- ^ name of file to map
-                   -> Mode                         -- ^ access mode
-                   -> Maybe (Int64,Int)            -- ^ range to map, maps whole file if Nothing
-                   -> IO (ForeignPtr a,Int)        -- ^ foreign pointer to beginning of region and size
-mmapFileForeignPtr filepath mode offsetsize = do
-    (ptr,finalizer,size) <- mmapFilePtr filepath mode offsetsize
-    foreignptr <- Foreign.Concurrent.newForeignPtr ptr finalizer
-    return (foreignptr,size)
-
+                return (ptr `plusPtr` fromIntegral align,fromIntegral size)
 
 -- | Maps region of file and returns it as 'Data.ByteString.ByteString'.
 -- File is mapped in in 'ReadOnly' mode. See 'mmapFilePtr' for details
@@ -190,7 +202,9 @@ mmapFilePtrLazy filepath mode offsetsize = do
                 ptr <- c_system_io_mmap_mmap handle (fromIntegral $ fromEnum mode) (fromIntegral offsetraw) (fromIntegral sizeraw)
                 when (ptr == nullPtr) $
                      throwErrno $ "mmap of '" ++ filepath ++ "' failed"
-                let finalizer = c_system_io_mmap_munmap ptr (fromIntegral sizeraw)
+                sizeptr <- malloc
+                poke sizeptr $ fromIntegral sizeraw
+                let finalizer = c_system_io_mmap_munmap sizeptr ptr
                 return (ptr `plusPtr` fromIntegral align,finalizer,fromIntegral size)
 
 chunks :: Int64 -> Int64 -> [(Int64,Int)]
@@ -239,15 +253,25 @@ mmapFileOpen :: FilePath -> Mode -> IO (ForeignPtr ())
 mmapFileOpen filepath mode = do
     ptr <- withCString filepath $ \filepath -> c_system_io_mmap_file_open filepath (fromIntegral $ fromEnum mode)
     when (ptr == nullPtr) $
-        throwErrno $ "mmap of '" ++ filepath ++ "' failed"
-    handle <- Foreign.ForeignPtr.newForeignPtr c_system_io_mmap_file_close ptr
+        throwErrno $ "opening of '" ++ filepath ++ "' failed"
+    handle <- newForeignPtr c_system_io_mmap_file_close ptr
     return handle
 
-foreign import ccall unsafe "system_io_mmap_file_open" c_system_io_mmap_file_open :: CString -> CInt -> IO (Ptr ())
-foreign import ccall unsafe "&system_io_mmap_file_close" c_system_io_mmap_file_close :: FunPtr(Ptr () -> IO ())
-foreign import ccall unsafe "system_io_mmap_mmap" c_system_io_mmap_mmap :: Ptr () -> CInt -> CLLong -> CInt -> IO (Ptr ())
-foreign import ccall unsafe "system_io_mmap_munmap" c_system_io_mmap_munmap :: Ptr () -> CInt -> IO ()
-foreign import ccall unsafe "system_io_mmap_file_size" c_system_io_file_size :: Ptr () -> IO (CLLong)
-foreign import ccall unsafe "system_io_mmap_granularity" c_system_io_granularity :: CInt
+foreign import ccall unsafe "system_io_mmap_file_open"
+    c_system_io_mmap_file_open :: CString -> CInt -> IO (Ptr ())
+foreign import ccall unsafe "&system_io_mmap_file_close"
+    c_system_io_mmap_file_close :: FunPtr(Ptr () -> IO ())
+
+foreign import ccall unsafe "system_io_mmap_mmap"
+    c_system_io_mmap_mmap :: Ptr () -> CInt -> CLLong -> CInt -> IO (Ptr a)
+foreign import ccall unsafe "&system_io_mmap_munmap"
+    c_system_io_mmap_munmap_funptr :: FunPtr(Ptr CInt -> Ptr a -> IO ())
+foreign import ccall unsafe "system_io_mmap_munmap"
+    c_system_io_mmap_munmap :: Ptr CInt -> Ptr a -> IO ()
+
+foreign import ccall unsafe "system_io_mmap_file_size"
+    c_system_io_file_size :: Ptr () -> IO (CLLong)
+foreign import ccall unsafe "system_io_mmap_granularity"
+    c_system_io_granularity :: CInt
 
 
