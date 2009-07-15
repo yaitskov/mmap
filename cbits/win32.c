@@ -1,8 +1,4 @@
-
-
-
 #include <windows.h>
-#include <stdio.h>
 
 //foreign import ccall unsafe "system_io_mmap_file_open" c_system_io_mmap_file_open :: CString -> CInt -> IO (Ptr ())
 void *system_io_mmap_file_open(const char *filepath, int mode)
@@ -100,12 +96,10 @@ void *system_io_mmap_mmap(void *handle, int mode, long long offset, int size)
     mapping = CreateFileMapping(handle, NULL, flProtect, (DWORD) ((offset + size)>>32), (DWORD)(offset + size), NULL);
     if( !mapping ) {
       DWORD dw = GetLastError();
-      fprintf(stderr,"CreateFileMapping %d\n",(int)dw);
     }
     ptr = MapViewOfFile(mapping,dwDesiredAccess, (DWORD)(offset>>32), (DWORD)(offset), size );
     if( !ptr ) {
       DWORD dw = GetLastError();
-      fprintf(stderr,"MapViewOfFile %d\n",(int)dw);
     }
     CloseHandle(mapping);
     return ptr;
