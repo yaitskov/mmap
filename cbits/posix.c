@@ -8,7 +8,7 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <malloc.h>
+#include <stdlib.h>
 #include <sys/errno.h>
 
 //foreign import ccall unsafe "system_io_mmap_file_open" c_system_io_mmap_file_open :: CString -> CInt -> IO (Ptr ())
