@@ -1,4 +1,4 @@
-
+#include "HsMmap.h"
 
 #define _LARGEFILE64_SOURCE1
 #define _FILE_OFFSET_BITS 64

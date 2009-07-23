@@ -1,3 +1,4 @@
+#include "HsMmap.h"
 #include <windows.h>
 
 //foreign import ccall unsafe "system_io_mmap_file_open" c_system_io_mmap_file_open :: CString -> CInt -> IO (Ptr ())

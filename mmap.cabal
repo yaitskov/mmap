@@ -16,6 +16,7 @@ Description:
 Cabal-version: >= 1.2
 Category: System
 Build-type: Simple
+Extra-Source-Files: HsMmap.h
 
 Library
   Build-depends: base<5, bytestring
@@ -23,6 +24,7 @@ Library
   Exposed-modules: System.IO.MMap
   Hs-source-dirs: .
   CC-options: -Wall
+  Include-dirs: cbits
   if os(mingw32)
       C-sources: cbits/win32.c
   else

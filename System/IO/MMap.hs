@@ -257,21 +257,21 @@ mmapFileOpen filepath mode = do
     handle <- newForeignPtr c_system_io_mmap_file_close ptr
     return handle
 
-foreign import ccall unsafe "system_io_mmap_file_open"
+foreign import ccall unsafe "HsMmap.h system_io_mmap_file_open"
     c_system_io_mmap_file_open :: CString -> CInt -> IO (Ptr ())
-foreign import ccall unsafe "&system_io_mmap_file_close"
+foreign import ccall unsafe "HsMmap.h &system_io_mmap_file_close"
     c_system_io_mmap_file_close :: FunPtr(Ptr () -> IO ())
 
-foreign import ccall unsafe "system_io_mmap_mmap"
+foreign import ccall unsafe "HsMmap.h system_io_mmap_mmap"
     c_system_io_mmap_mmap :: Ptr () -> CInt -> CLLong -> CInt -> IO (Ptr a)
-foreign import ccall unsafe "&system_io_mmap_munmap"
+foreign import ccall unsafe "HsMmap.h &system_io_mmap_munmap"
     c_system_io_mmap_munmap_funptr :: FunPtr(Ptr CInt -> Ptr a -> IO ())
 foreign import ccall unsafe "system_io_mmap_munmap"
     c_system_io_mmap_munmap :: Ptr CInt -> Ptr a -> IO ()
 
-foreign import ccall unsafe "system_io_mmap_file_size"
+foreign import ccall unsafe "HsMmap.h system_io_mmap_file_size"
     c_system_io_file_size :: Ptr () -> IO (CLLong)
-foreign import ccall unsafe "system_io_mmap_granularity"
+foreign import ccall unsafe "HsMmap.h system_io_mmap_granularity"
     c_system_io_granularity :: CInt
 
 
