@@ -22,9 +22,9 @@ import System.IO ()
 import Foreign.Ptr (Ptr,FunPtr,nullPtr,plusPtr)
 import Foreign.C.Types (CInt,CLLong)
 import Foreign.C.String (CString,withCString)
-import Foreign.ForeignPtr (ForeignPtr,withForeignPtr,finalizeForeignPtr,newForeignPtr,newForeignPtrEnv)
+import Foreign.ForeignPtr (ForeignPtr,withForeignPtr,finalizeForeignPtr,newForeignPtr,newForeignPtrEnv,mallocForeignPtrBytes)
 import Foreign.Storable( poke )
-import Foreign.Marshal.Alloc( malloc )
+import Foreign.Marshal.Alloc( malloc, mallocBytes, free )
 import Foreign.C.Error ( throwErrno )
 import qualified Foreign.Concurrent( newForeignPtr )
 import System.IO.Unsafe  (unsafePerformIO)
@@ -94,9 +94,14 @@ mmapFilePtr :: FilePath                -- ^ name of file to mmap
             -> IO (Ptr a,IO (),Int)    -- ^ pointer, finalizer and size
 mmapFilePtr fp m range = do
   (ptr, size) <- mmapFilePtr' fp m range
-  sizeptr <- malloc
-  poke sizeptr (fromIntegral size)
-  return (ptr, c_system_io_mmap_munmap sizeptr ptr, size)
+  if size>0 
+      then do
+              sizeptr <- malloc
+              poke sizeptr (fromIntegral size)
+              return (ptr, c_system_io_mmap_munmap sizeptr ptr, size)
+      else do
+              ptr <- mallocBytes 1
+              return (ptr,free ptr,0)
 
 -- | Maps region of file and returns it as 'ForeignPtr'. See 'mmapFilePtr' for details.
 mmapFileForeignPtr :: FilePath                     -- ^ name of file to map
@@ -105,10 +110,15 @@ mmapFileForeignPtr :: FilePath                     -- ^ name of file to map
                    -> IO (ForeignPtr a,Int)        -- ^ foreign pointer to beginning of region and size
 mmapFileForeignPtr fp m range = do
   (ptr, size) <- mmapFilePtr' fp m range
-  sizeptr <- malloc
-  poke sizeptr (fromIntegral size)
-  foreignptr <- newForeignPtrEnv c_system_io_mmap_munmap_funptr sizeptr ptr
-  return (foreignptr,size)
+  if size>0
+    then do
+        sizeptr <- malloc
+        poke sizeptr (fromIntegral size)
+        foreignptr <- newForeignPtrEnv c_system_io_mmap_munmap_funptr sizeptr ptr
+        return (foreignptr,size)
+    else do
+        foreignptr <- mallocForeignPtrBytes 1
+        return (foreignptr,size)
 
 mmapFilePtr' :: FilePath                -- ^ name of file to mmap
              -> Mode                    -- ^ access mode
@@ -118,22 +128,24 @@ mmapFilePtr' filepath mode offsetsize = do
     bracket (mmapFileOpen filepath mode)
             (finalizeForeignPtr) mmap
     where
-        mmap handle = do
+        mmap handle = withForeignPtr handle $ \handle -> do
             (offset,size) <- case offsetsize of
                 Just (offset,size) -> return (offset,size)
                 Nothing -> do
-                    longsize <- withForeignPtr handle c_system_io_file_size
+                    longsize <- c_system_io_file_size handle
                     when (longsize > fromIntegral (maxBound :: Int)) $
                          fail ("file is longer (" ++ show longsize ++ ") than maxBound::Int")
                     return (0,fromIntegral longsize)
-            withForeignPtr handle $ \handle -> do
-                let align = offset `mod` fromIntegral c_system_io_granularity
-                    offsetraw = offset - align
-                    sizeraw = size + fromIntegral align
-                ptr <- c_system_io_mmap_mmap handle (fromIntegral $ fromEnum mode) (fromIntegral offsetraw) (fromIntegral sizeraw)
-                when (ptr == nullPtr) $
-                      throwErrno $ "mmap of '" ++ filepath ++ "' failed"
-                return (ptr `plusPtr` fromIntegral align,fromIntegral size)
+            if size<=0
+                then return (nullPtr,0)
+                else do
+                      let align = offset `mod` fromIntegral c_system_io_granularity
+                          offsetraw = offset - align
+                          sizeraw = size + fromIntegral align
+                      ptr <- c_system_io_mmap_mmap handle (fromIntegral $ fromEnum mode) (fromIntegral offsetraw) (fromIntegral sizeraw)
+                      when (ptr == nullPtr) $
+                            throwErrno $ "mmap of '" ++ filepath ++ "' failed"
+                      return (ptr `plusPtr` fromIntegral align,fromIntegral size)
 
 -- | Maps region of file and returns it as 'Data.ByteString.ByteString'.
 -- File is mapped in in 'ReadOnly' mode. See 'mmapFilePtr' for details
@@ -207,6 +219,7 @@ mmapFilePtrLazy filepath mode offsetsize = do
                 return (ptr `plusPtr` fromIntegral align,finalizer,fromIntegral size)
 
 chunks :: Int64 -> Int64 -> [(Int64,Int)]
+chunks offset 0 = []
 chunks offset size | size <= fromIntegral chunkSize = [(offset,fromIntegral size)]
                    | otherwise = let offset2 = offset + fromIntegral chunkSize `div` fromIntegral chunkSize * fromIntegral chunkSize
                                      size2 = fromIntegral (offset2 - offset)
