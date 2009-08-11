@@ -11,6 +11,15 @@
 #include <stdlib.h>
 #include <sys/errno.h>
 
+#ifdef _DEBUG
+int counters = 0;
+
+int system_io_mmap_counters()
+{
+    return counters;
+}
+#endif
+
 //foreign import ccall unsafe "system_io_mmap_file_open" c_system_io_mmap_file_open :: CString -> CInt -> IO (Ptr ())
 void *system_io_mmap_file_open(const char *filepath, int mode)
 {
@@ -32,16 +41,16 @@ void *system_io_mmap_file_open(const char *filepath, int mode)
 	return NULL;
     }
 #ifdef O_NOCTTY
-    access |= O_NOCTTY;
+    // access |= O_NOCTTY;
 #endif
 #ifdef O_LARGEFILE
-    access |= O_LARGEFILE;
+    // access |= O_LARGEFILE;
 #endif
     fd = open(filepath,access,0666);
-    handle = (void *)fd + 1;
     if( fd == -1 ) {
         return NULL;
     }
+    handle = (void *)fd + 1;
     return handle;
 }
 

@@ -14,6 +14,8 @@ import Control.Concurrent
 import Control.Exception as E
 import Test.HUnit
 import System.Directory
+import Foreign.C.Types (CInt,CLLong)
+import Control.Monad
 
 {-
 
@@ -35,31 +37,55 @@ Things to test:
 
 -}
 
+foreign import ccall unsafe "HsMmap.h system_io_mmap_counters"
+    c_system_io_counters :: IO CInt
+
+
 content = BSC.pack "Memory mapping of files for POSIX and Windows"
 
 test_normal_readonly = do
-    System.Mem.performGC
-    BSC.writeFile "test.bin" content
-    bs <- mmapFileByteString "test.bin" Nothing
+    BSC.writeFile "test_normal.bin" content
+    bs <- mmapFileByteString "test_normal.bin" Nothing
     return (bs @?= content)
 
 test_normal_readonly_zero_length = do
-    System.Mem.performGC
-    let content = BSC.pack ""
-    BSC.writeFile "test1.bin" content
-    bs <- mmapFileByteString "test1.bin" Nothing
-    return (bs @?= content)
+    BSC.writeFile "test_zerolength.bin" BSC.empty
+    bs <- mmapFileByteString "test_zerolength.bin" Nothing
+    return (bs @?= BSC.empty)
 
 test_non_existing_readonly = do
-    System.Mem.performGC
-    removeFile "testx.bin" `E.catch` (\e -> return undefined)
-    (do mmapFileByteString "testx.bin" Nothing
+    removeFile "test_notexists.bin" `E.catch` (\e -> return undefined)
+    (do mmapFileByteString "test_notexists.bin" Nothing
         return $ assertFailure "Should throw exception")
         `E.catch` (\e -> return (return ()))
 
-alltests = [ test_normal_readonly
-           , test_normal_readonly_zero_length
-           , test_non_existing_readonly
+test_no_permission_readonly = do
+    let filename = "test_nopermission.bin"
+    setPermissions filename (Permissions {readable = True, writable = True, executable = True, searchable = True})
+        `E.catch` (\e -> return undefined)
+    BSC.writeFile filename content
+    setPermissions filename (Permissions {readable = False, writable = False, executable = False, searchable = False})
+    Permissions {readable = readable} <- getPermissions filename
+          -- no way to clear read flag under Windows, skip the test
+    if not readable 
+        then (do mmapFileByteString filename Nothing
+                 return $ assertFailure "Should throw exception")
+              `E.catch` (\e -> return (return ()))
+        else return $ return ()
+
+test_counters_zero = do
+    System.Mem.performGC
+    threadDelay 1000
+    counters <- c_system_io_counters
+    return (counters @?= 0)
+
+alltests = [ "Normal read only mmap" ~: test_normal_readonly
+           , "Zero length file mmap" ~: test_normal_readonly_zero_length
+           , "File does not exist" ~: test_non_existing_readonly
+           , "No permission to read file" ~: test_no_permission_readonly
+           
+           -- insert tests above this line
+           , "Counters should be zero" ~: test_counters_zero
            ]
 
 main = do

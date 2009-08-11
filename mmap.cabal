@@ -41,7 +41,7 @@ Executable mmaptest
   Build-depends: base<5, bytestring, HUnit, directory
   Extensions: ForeignFunctionInterface
   Hs-source-dirs: .
-  CC-options: -Wall
+  CC-options: -Wall -D_DEBUG
   Include-dirs: cbits
   if os(mingw32)
       C-sources: cbits/win32.c

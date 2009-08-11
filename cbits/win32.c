@@ -1,6 +1,16 @@
 #include "HsMmap.h"
 #include <windows.h>
 
+#ifdef _DEBUG
+int counters = 0;
+
+int system_io_mmap_counters()
+{
+    return counters;
+}
+#endif
+
+
 //foreign import ccall unsafe "system_io_mmap_file_open" c_system_io_mmap_file_open :: CString -> CInt -> IO (Ptr ())
 void *system_io_mmap_file_open(const char *filepath, int mode)
 {
@@ -45,6 +55,9 @@ void *system_io_mmap_file_open(const char *filepath, int mode)
                          NULL);
     if( handle==INVALID_HANDLE_VALUE )
         return NULL;
+#ifdef _DEBUG
+    counters++;
+#endif
     return handle;
 }
 
@@ -52,6 +65,9 @@ void *system_io_mmap_file_open(const char *filepath, int mode)
 void system_io_mmap_file_close(void *handle)
 {
     CloseHandle(handle);
+#ifdef _DEBUG
+    counters--;
+#endif
 }
 
 char zerolengthfile[1];
@@ -111,6 +127,11 @@ void *system_io_mmap_mmap(void *handle, int mode, long long offset, int size)
       DWORD dw = GetLastError();
     }
     CloseHandle(mapping);
+#ifdef _DEBUG
+    if( ptr ) {
+        counters++;
+    }
+#endif
     return ptr;
 }
 
@@ -121,6 +142,9 @@ void system_io_mmap_munmap(int *size, void *ptr) // Ptr CInt -> Ptr a -> IO ()
          * Windows cannot map zero length files. Bails at them. We pretend here we did map it and unmap it now.
          */
         UnmapViewOfFile(ptr);
+#ifdef _DEBUG
+        counters--;
+#endif
     }
     free(size);
 }

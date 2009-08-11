@@ -1,4 +1,3 @@
-{-# OPTIONS_GHC -fglasgow-exts #-}
 
 module System.IO.MMap
 (
@@ -251,7 +250,7 @@ chunkSize = fromIntegral $ (128*1024 `div` c_system_io_granularity) * c_system_i
 
 mmapFileOpen :: FilePath -> Mode -> IO (ForeignPtr ())
 mmapFileOpen filepath mode = do
-    ptr <- withCString filepath $ \filepath -> 
+    ptr <- withCString filepath $ \filepath ->
         c_system_io_mmap_file_open filepath (fromIntegral $ fromEnum mode)
     when (ptr == nullPtr) $
         throwErrno $ "opening of '" ++ filepath ++ "' failed"
