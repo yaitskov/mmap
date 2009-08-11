@@ -41,10 +41,10 @@ void *system_io_mmap_file_open(const char *filepath, int mode)
 	return NULL;
     }
 #ifdef O_NOCTTY
-    // access |= O_NOCTTY;
+    access |= O_NOCTTY;
 #endif
 #ifdef O_LARGEFILE
-    // access |= O_LARGEFILE;
+    access |= O_LARGEFILE;
 #endif
     fd = open(filepath,access,0666);
     if( fd == -1 ) {
