@@ -23,15 +23,15 @@ void *system_io_mmap_file_open(const char *filepath, int mode)
     switch(mode) {
         case 0:
             dwDesiredAccess = GENERIC_READ;
-            dwCreationDisposition = OPEN_ALWAYS;
+            dwCreationDisposition = OPEN_EXISTING;
             break;
         case 1:
             dwDesiredAccess = GENERIC_WRITE|GENERIC_READ;
-            dwCreationDisposition = OPEN_ALWAYS;
+            dwCreationDisposition = OPEN_EXISTING;
             break;
         case 2:
             dwDesiredAccess = GENERIC_READ;
-            dwCreationDisposition = OPEN_ALWAYS;
+            dwCreationDisposition = OPEN_EXISTING;
             break;
         default:
             return NULL;
@@ -53,6 +53,8 @@ void system_io_mmap_file_close(void *handle)
 {
     CloseHandle(handle);
 }
+
+char zerolengthfile[1];
 
 //foreign import ccall unsafe "system_io_mmap_mmap" c_system_io_mmap_mmap :: Ptr () -> CInt -> CLLong -> CInt -> IO (Ptr ())
 void *system_io_mmap_mmap(void *handle, int mode, long long offset, int size)
@@ -94,6 +96,12 @@ void *system_io_mmap_mmap(void *handle, int mode, long long offset, int size)
         default:
             return NULL;
     }
+    /*
+     * Windows cannot map zero length files. Bails at them. We pretend here we map it.
+     */
+    if( size==0 ) {
+        return zerolengthfile;
+    }
     mapping = CreateFileMapping(handle, NULL, flProtect, (DWORD) ((offset + size)>>32), (DWORD)(offset + size), NULL);
     if( !mapping ) {
       DWORD dw = GetLastError();
@@ -108,7 +116,12 @@ void *system_io_mmap_mmap(void *handle, int mode, long long offset, int size)
 
 void system_io_mmap_munmap(int *size, void *ptr) // Ptr CInt -> Ptr a -> IO ()
 {
-    UnmapViewOfFile(ptr);
+    if( *size!=0 ) {
+        /*
+         * Windows cannot map zero length files. Bails at them. We pretend here we did map it and unmap it now.
+         */
+        UnmapViewOfFile(ptr);
+    }
     free(size);
 }
 

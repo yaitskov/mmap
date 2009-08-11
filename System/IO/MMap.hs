@@ -251,7 +251,8 @@ chunkSize = fromIntegral $ (128*1024 `div` c_system_io_granularity) * c_system_i
 
 mmapFileOpen :: FilePath -> Mode -> IO (ForeignPtr ())
 mmapFileOpen filepath mode = do
-    ptr <- withCString filepath $ \filepath -> c_system_io_mmap_file_open filepath (fromIntegral $ fromEnum mode)
+    ptr <- withCString filepath $ \filepath -> 
+        c_system_io_mmap_file_open filepath (fromIntegral $ fromEnum mode)
     when (ptr == nullPtr) $
         throwErrno $ "opening of '" ++ filepath ++ "' failed"
     handle <- newForeignPtr c_system_io_mmap_file_close ptr
@@ -266,7 +267,7 @@ foreign import ccall unsafe "HsMmap.h system_io_mmap_mmap"
     c_system_io_mmap_mmap :: Ptr () -> CInt -> CLLong -> CInt -> IO (Ptr a)
 foreign import ccall unsafe "HsMmap.h &system_io_mmap_munmap"
     c_system_io_mmap_munmap_funptr :: FunPtr(Ptr CInt -> Ptr a -> IO ())
-foreign import ccall unsafe "system_io_mmap_munmap"
+foreign import ccall unsafe "HsMmap.h system_io_mmap_munmap"
     c_system_io_mmap_munmap :: Ptr CInt -> Ptr a -> IO ()
 
 foreign import ccall unsafe "HsMmap.h system_io_mmap_file_size"

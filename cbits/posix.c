@@ -23,7 +23,7 @@ void *system_io_mmap_file_open(const char *filepath, int mode)
 	access = O_RDONLY;
 	break;
     case 1:
-	access = O_RDWR|O_CREAT;
+	access = O_RDWR;
 	break;
     case 2:
 	access = O_RDONLY;
@@ -31,6 +31,12 @@ void *system_io_mmap_file_open(const char *filepath, int mode)
     default:
 	return NULL;
     }
+#ifdef O_NOCTTY
+    access |= O_NOCTTY;
+#endif
+#ifdef O_LARGEFILE
+    access |= O_LARGEFILE;
+#endif
     fd = open(filepath,access,0666);
     handle = (void *)fd + 1;
     if( fd == -1 ) {

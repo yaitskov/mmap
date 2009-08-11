@@ -38,7 +38,7 @@ Executable mmaptest
       Buildable: True
   else
       Buildable: False
-  Build-depends: base<5, bytestring
+  Build-depends: base<5, bytestring, HUnit, directory
   Extensions: ForeignFunctionInterface
   Hs-source-dirs: .
   CC-options: -Wall
