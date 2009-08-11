@@ -18,10 +18,28 @@ Category: System
 Build-type: Simple
 Extra-Source-Files: HsMmap.h
 
+Flag mmaptest
+  Default: False
+
 Library
   Build-depends: base<5, bytestring
   Extensions: ForeignFunctionInterface
   Exposed-modules: System.IO.MMap
+  Hs-source-dirs: .
+  Include-dirs: cbits
+  if os(mingw32)
+      C-sources: cbits/win32.c
+  else
+      C-sources: cbits/posix.c
+
+Executable mmaptest
+  Main-is: tests/mmaptest.hs
+  if flag(mmaptest)
+      Buildable: True
+  else
+      Buildable: False
+  Build-depends: base<5, bytestring
+  Extensions: ForeignFunctionInterface
   Hs-source-dirs: .
   CC-options: -Wall
   Include-dirs: cbits
