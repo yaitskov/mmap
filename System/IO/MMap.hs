@@ -130,13 +130,18 @@ mmapFilePtr' filepath mode offsetsize = do
     where
         mmap handle = withForeignPtr handle $ \handle -> do
             (offset,size) <- case offsetsize of
-                Just (offset,size) -> return (offset,size)
+                Just (offset,size) -> do
+                    when (size<0) $
+                         throwErrno $ "mmap of '" ++ filepath ++ "' failed, negative size reguested"
+                    when (offset<0) $
+                         throwErrno $ "mmap of '" ++ filepath ++ "' failed, negative offset reguested"
+                    return (offset,size)
                 Nothing -> do
                     longsize <- c_system_io_file_size handle
                     when (longsize > fromIntegral (maxBound :: Int)) $
                          fail ("file is longer (" ++ show longsize ++ ") than maxBound::Int")
                     return (0,fromIntegral longsize)
-            if size<=0
+            if size==0
                 then return (nullPtr,0)
                 else do
                       let align = offset `mod` fromIntegral c_system_io_granularity

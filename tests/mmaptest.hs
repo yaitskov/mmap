@@ -67,11 +67,53 @@ test_no_permission_readonly = do
     setPermissions filename (Permissions {readable = False, writable = False, executable = False, searchable = False})
     Permissions {readable = readable} <- getPermissions filename
           -- no way to clear read flag under Windows, skip the test
-    if not readable 
+    if not readable
         then (do mmapFileByteString filename Nothing
                  return $ assertFailure "Should throw exception")
               `E.catch` (\e -> return (return ()))
         else return $ return ()
+
+test_normal_negative_offset_readonly = do
+    removeFile "test_normal1.bin" `E.catch` (\e -> return undefined)
+    BSC.writeFile "test_normal1.bin" content
+    (do mmapFileByteString "test_normal1.bin" (Just (-20,5))
+        return $ assertFailure "Should throw exception")
+        `E.catch` (\e -> return (return ()))
+
+test_normal_negative_size_readonly = do
+    removeFile "test_normal2.bin" `E.catch` (\e -> return undefined)
+    BSC.writeFile "test_normal2.bin" content
+    (do mmapFileByteString "test_normal2.bin" (Just (0,-5))
+        return $ assertFailure "Should throw exception")
+        `E.catch` (\e -> return (return ()))
+
+test_normal_offset_size_readonly = do
+    let filename = "test_normal5.bin"
+    BSC.writeFile filename content
+    bs <- mmapFileByteString filename (Just (5,5))
+    let exp = BSC.take 5 (BSC.drop 5 content)
+    return (bs @?= exp)
+
+test_normal_offset_size_zero_readonly = do
+    let filename = "test_normal6.bin"
+    BSC.writeFile filename content
+    bs <- mmapFileByteString filename (Just (5,0))
+    let exp = BSC.empty
+    return (bs @?= exp)
+
+test_normal_offset_beyond_eof_readonly = do
+    let filename = "test_normal6.bin"
+    BSC.writeFile filename content
+    (do mmapFileByteString filename (Just (1000,5))
+        return $ assertFailure "Should throw exception")
+        `E.catch` (\e -> return (return ()))
+
+test_normal_offset_plus_size_beyond_eof_readonly = do
+    let filename = "test_normal7.bin"
+    BSC.writeFile filename content
+    (do mmapFileByteString filename (Just (4,5000))
+        return $ assertFailure "Should throw exception")
+        `E.catch` (\e -> return (return ()))
 
 test_counters_zero = do
     System.Mem.performGC
@@ -83,7 +125,13 @@ alltests = [ "Normal read only mmap" ~: test_normal_readonly
            , "Zero length file mmap" ~: test_normal_readonly_zero_length
            , "File does not exist" ~: test_non_existing_readonly
            , "No permission to read file" ~: test_no_permission_readonly
-           
+           , "Signal error when negative offset given" ~: test_normal_negative_offset_readonly
+           , "Signal error when negative size given" ~: test_normal_negative_size_readonly
+           , "Test if we can cut part of file" ~: test_normal_offset_size_readonly
+           , "Test if we can cut zero length part of file" ~: test_normal_offset_size_zero_readonly
+           , "Should throw error if mmaping readonly beyond end of file" ~: test_normal_offset_beyond_eof_readonly
+           , "Should throw error if mmaping readonly with size beyond end of file" ~: test_normal_offset_plus_size_beyond_eof_readonly
+
            -- insert tests above this line
            , "Counters should be zero" ~: test_counters_zero
            ]
