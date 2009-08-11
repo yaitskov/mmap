@@ -128,11 +128,25 @@ void *system_io_mmap_mmap(void *handle, int mode, long long offset, int size)
     return ptr;
 }
 
+/*
+ * MSDN states:
+ * 
+ * Although an application may close the file handle used to create a file mapping object, 
+ * the system holds the corresponding file open until the last view of the file is unmapped:
+ *
+ * Files for which the last view has not yet been unmapped are held open with no sharing restrictions.
+ *
+ * Who knows what this means?
+ *
+ * http://msdn.microsoft.com/en-us/library/aa366882(VS.85).aspx
+ */
 void system_io_mmap_munmap(int *size, void *ptr) // Ptr CInt -> Ptr a -> IO ()
 {
-    UnmapViewOfFile(ptr);
+    BOOL result = UnmapViewOfFile(ptr);
 #ifdef _DEBUG
-    counters--;
+    if( result ) {
+        counters--;
+    }
 #endif
     free(size);
 }

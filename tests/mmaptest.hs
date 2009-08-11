@@ -37,6 +37,8 @@ Things to test:
 
 -}
 
+ignoreExceptions doit = (doit >> return ()) `E.catch` (\(e::SomeException) -> return ())
+
 foreign import ccall unsafe "HsMmap.h system_io_mmap_counters"
     c_system_io_counters :: IO CInt
 
@@ -46,74 +48,73 @@ content = BSC.pack "Memory mapping of files for POSIX and Windows"
 test_normal_readonly = do
     BSC.writeFile "test_normal.bin" content
     bs <- mmapFileByteString "test_normal.bin" Nothing
-    return (bs @?= content)
+    bs @?= content
 
 test_normal_readonly_zero_length = do
     BSC.writeFile "test_zerolength.bin" BSC.empty
     bs <- mmapFileByteString "test_zerolength.bin" Nothing
-    return (bs @?= BSC.empty)
+    bs @?= BSC.empty
 
 test_non_existing_readonly = do
-    removeFile "test_notexists.bin" `E.catch` (\e -> return undefined)
-    (do mmapFileByteString "test_notexists.bin" Nothing
-        return $ assertFailure "Should throw exception")
-        `E.catch` (\e -> return (return ()))
+    ignoreExceptions $ removeFile "test_notexists.bin"
+    ignoreExceptions $ do
+        mmapFileByteString "test_notexists.bin" Nothing
+        assertFailure "Should throw exception"
 
 test_no_permission_readonly = do
     let filename = "test_nopermission.bin"
-    setPermissions filename (Permissions {readable = True, writable = True, executable = True, searchable = True})
-        `E.catch` (\e -> return undefined)
+    ignoreExceptions $ setPermissions filename (Permissions {readable = True, writable = True, executable = True, searchable = True})
     BSC.writeFile filename content
     setPermissions filename (Permissions {readable = False, writable = False, executable = False, searchable = False})
     Permissions {readable = readable} <- getPermissions filename
           -- no way to clear read flag under Windows, skip the test
     if not readable
-        then (do mmapFileByteString filename Nothing
-                 return $ assertFailure "Should throw exception")
-              `E.catch` (\e -> return (return ()))
-        else return $ return ()
+        then ignoreExceptions $ do
+                 mmapFileByteString filename Nothing
+                 assertFailure "Should throw exception"
+        else return ()
 
 test_normal_negative_offset_readonly = do
-    removeFile "test_normal1.bin" `E.catch` (\e -> return undefined)
+    ignoreExceptions $ removeFile "test_normal1.bin"
     BSC.writeFile "test_normal1.bin" content
-    (do mmapFileByteString "test_normal1.bin" (Just (-20,5))
-        return $ assertFailure "Should throw exception")
-        `E.catch` (\e -> return (return ()))
+    ignoreExceptions $ do
+        mmapFileByteString "test_normal1.bin" (Just (-20,5))
+        assertFailure "Should throw exception"
 
 test_normal_negative_size_readonly = do
-    removeFile "test_normal2.bin" `E.catch` (\e -> return undefined)
+    ignoreExceptions $ removeFile "test_normal2.bin"
     BSC.writeFile "test_normal2.bin" content
-    (do mmapFileByteString "test_normal2.bin" (Just (0,-5))
-        return $ assertFailure "Should throw exception")
-        `E.catch` (\e -> return (return ()))
+    ignoreExceptions $ do
+        mmapFileByteString "test_normal2.bin" (Just (0,-5))
+        assertFailure "Should throw exception"
 
 test_normal_offset_size_readonly = do
     let filename = "test_normal5.bin"
     BSC.writeFile filename content
     bs <- mmapFileByteString filename (Just (5,5))
     let exp = BSC.take 5 (BSC.drop 5 content)
-    return (bs @?= exp)
+    bs @?= exp
 
 test_normal_offset_size_zero_readonly = do
     let filename = "test_normal6.bin"
     BSC.writeFile filename content
     bs <- mmapFileByteString filename (Just (5,0))
     let exp = BSC.empty
-    return (bs @?= exp)
+    bs @?= exp
 
 test_normal_offset_beyond_eof_readonly = do
     let filename = "test_normal6.bin"
     BSC.writeFile filename content
-    (do mmapFileByteString filename (Just (1000,5))
-        return $ assertFailure "Should throw exception")
-        `E.catch` (\e -> return (return ()))
+    ignoreExceptions $ do
+        mmapFileByteString filename (Just (1000,5))
+        assertFailure "Should throw exception"
 
 test_normal_offset_plus_size_beyond_eof_readonly = do
     let filename = "test_normal7.bin"
     BSC.writeFile filename content
-    (do mmapFileByteString filename (Just (4,5000))
-        return $ assertFailure "Should throw exception")
-        `E.catch` (\e -> return (return ()))
+    ignoreExceptions $ do
+        mmapFileByteString filename (Just (4,5000))
+        assertFailure "Should throw exception"
 
 test_counters_zero = do
     System.Mem.performGC

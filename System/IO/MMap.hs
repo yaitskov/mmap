@@ -8,6 +8,9 @@ module System.IO.MMap
      mmapFileForeignPtr,
      mmapFileByteString,
 
+     munmapFilePtr,
+     munmapFilePtrFinalizer,
+
      -- * Memory mapped files lazy interface
      mmapFilePtrLazy,
      mmapFileForeignPtrLazy,
@@ -19,7 +22,7 @@ module System.IO.MMap
 where
 
 import System.IO ()
-import Foreign.Ptr (Ptr,FunPtr,nullPtr,plusPtr)
+import Foreign.Ptr (Ptr,FunPtr,nullPtr,plusPtr,minusPtr)
 import Foreign.C.Types (CInt,CLLong)
 import Foreign.C.String (CString,withCString)
 import Foreign.ForeignPtr (ForeignPtr,withForeignPtr,finalizeForeignPtr,newForeignPtr,newForeignPtrEnv,mallocForeignPtrBytes)
@@ -86,7 +89,9 @@ data Mode = ReadOnly      -- ^ file is mapped read-only
 -- of file region to map and size tells its length. There are no alignment
 -- requirements.
 --
--- If range to map extends beyond end of file, it will be resized accordingly.
+-- Range to map must not extend beyond end of file in ReadOnly or WriteCopy mode.
+-- In ReadWrite mode file will be extended as needed to cover offset plus size.
+-- File will never be truncated.
 --
 mmapFilePtr :: FilePath                -- ^ name of file to mmap
             -> Mode                    -- ^ access mode
@@ -163,7 +168,7 @@ mmapFilePtr' filepath mode offsetsize = do
 --
 mmapFileByteString :: FilePath                     -- ^ name of file to map
                    -> Maybe (Int64,Int)            -- ^ range to map, maps whole file if Nothing
-                   -> IO BS.ByteString                -- ^ bytestring with file content
+                   -> IO BS.ByteString             -- ^ bytestring with file contents
 mmapFileByteString filepath offsetsize = do
     (ptr,finalizer,size) <- mmapFilePtr filepath ReadOnly offsetsize
     bytestring <- BS.unsafePackCStringFinalizer ptr size finalizer
@@ -265,6 +270,12 @@ mmapFileByteStringLazy filepath offsetsize = do
             bytestring <- BS.unsafePackCStringFinalizer ptr size finalizer
             return bytestring
 
+munmapFilePtr :: Ptr CInt -> Ptr a -> IO ()
+munmapFilePtr = c_system_io_mmap_munmap
+
+munmapFilePtrFinalizer :: FunPtr(Ptr CInt -> Ptr a -> IO ())
+munmapFilePtrFinalizer = c_system_io_mmap_munmap_funptr
+
 chunkSize :: Int
 chunkSize = fromIntegral $ (128*1024 `div` c_system_io_granularity) * c_system_io_granularity
 
@@ -277,20 +288,42 @@ mmapFileOpen filepath mode = do
     handle <- newForeignPtr c_system_io_mmap_file_close ptr
     return handle
 
+-- we need to return non null ptr to nowhere, sometimes
+nonZeroPtr :: Ptr a
+nonZeroPtr = nullPtr `plusPtr` 128
+
+castPtrToInt :: Ptr a -> Int
+castPtrToInt ptr = ptr `minusPtr` nullPtr
+
+castIntToPtr :: Int -> Ptr a
+castIntToPtr int = nullPtr `plusPtr` int
+
+-- | Should open file given as CString in mode given as CInt
 foreign import ccall unsafe "HsMmap.h system_io_mmap_file_open"
-    c_system_io_mmap_file_open :: CString -> CInt -> IO (Ptr ())
+    c_system_io_mmap_file_open :: CString       -- ^ file path, system encoding
+                               -> CInt          -- ^ mode as 0, 1, 2, fromEnum
+                               -> IO (Ptr ())   -- ^ file handle returned, nullPtr on error (and errno set)
+-- | Used in finalizers, to close handle
 foreign import ccall unsafe "HsMmap.h &system_io_mmap_file_close"
     c_system_io_mmap_file_close :: FunPtr(Ptr () -> IO ())
 
+-- | Mmemory maps file from handle, using mode, starting offset and size
 foreign import ccall unsafe "HsMmap.h system_io_mmap_mmap"
-    c_system_io_mmap_mmap :: Ptr () -> CInt -> CLLong -> CInt -> IO (Ptr a)
+    c_system_io_mmap_mmap :: Ptr ()  -- ^ handle from c_system_io_mmap_file_open
+                          -> CInt    -- ^ mode
+                          -> CLLong  -- ^ starting offset, must be nonegative
+                          -> CInt    -- ^ length, must be greater than zero, in ReadOnly or WriteCopy offset+length must be less than file size
+                          -> IO (Ptr a) -- ^ starting pointer to byte data, nullPtr on error (plus errno set)
+-- | Used in finalizers
 foreign import ccall unsafe "HsMmap.h &system_io_mmap_munmap"
     c_system_io_mmap_munmap_funptr :: FunPtr(Ptr CInt -> Ptr a -> IO ())
+-- | Unmap region of memory. Size must be the same as returned by mmap. If size is zero, does nothing (treat pointer as invalid)
 foreign import ccall unsafe "HsMmap.h system_io_mmap_munmap"
     c_system_io_mmap_munmap :: Ptr CInt -> Ptr a -> IO ()
-
+-- | Get file size in system specific manner
 foreign import ccall unsafe "HsMmap.h system_io_mmap_file_size"
-    c_system_io_file_size :: Ptr () -> IO (CLLong)
+    c_system_io_file_size :: Ptr () -> IO CLLong
+-- | Memory mapping granularity.
 foreign import ccall unsafe "HsMmap.h system_io_mmap_granularity"
     c_system_io_granularity :: CInt
 

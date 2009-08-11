@@ -1,5 +1,5 @@
 Name: mmap
-Version: 0.4.2
+Version: 0.5
 Stability: alpha
 License: BSD3
 License-File: LICENSE
@@ -18,31 +18,34 @@ Category: System
 Build-type: Simple
 Extra-Source-Files: HsMmap.h
 
+Flag mmaptest
+  Description: Generate mmaptest executable
+  Default: False
+
 Library
   Build-depends: base<5, bytestring
   Extensions: ForeignFunctionInterface
   Exposed-modules: System.IO.MMap
   Hs-source-dirs: .
-  CC-options: -Wall
   Include-dirs: cbits
   if os(mingw32)
       C-sources: cbits/win32.c
   else
       C-sources: cbits/posix.c
 
-
-Executable testmmap
-  Main-is: tests/testmmap.hs
-  Build-depends: base<5, bytestring
-  Extensions: ForeignFunctionInterface
+Executable mmaptest
+  Main-is: tests/mmaptest.hs
+  if flag(mmaptest)
+      Buildable: True
+  else
+      Buildable: False
+  Build-depends: base<5, bytestring, HUnit, directory
+  Extensions: ForeignFunctionInterface, ScopedTypeVariables
   Hs-source-dirs: .
-  if flag(test)
-     CC-options: -Wall
-     Buildable: True
-  else
-     Buildable: False
+  CC-options: -Wall -D_DEBUG
   Include-dirs: cbits
   if os(mingw32)
       C-sources: cbits/win32.c
   else
       C-sources: cbits/posix.c
+
