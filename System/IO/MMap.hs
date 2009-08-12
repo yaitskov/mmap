@@ -9,7 +9,6 @@ module System.IO.MMap
      mmapFileByteString,
 
      munmapFilePtr,
-     munmapFilePtrFinalizer,
 
      -- * Memory mapped files lazy interface
      mmapFilePtrLazy,
@@ -40,13 +39,48 @@ import qualified Data.ByteString.Lazy as BSL  (ByteString,fromChunks)
 
 -- $mmap_intro
 --
--- This module is an interface to mmap(2) system call under POSIX (Unix, Linux,
--- Mac OS X) and CreateFileMapping,MapViewOfFile under Windows.
+-- This module is an interface to @mmap(2)@ system call under POSIX
+-- (Unix, Linux, Mac OS X) and @CreateFileMapping@, @MapViewOfFile@ under
+-- Windows.
 --
 -- We can consider mmap as lazy IO pushed into the virtual memory
 -- subsystem.
 --
--- It is only safe to mmap a file if you know you are the sole user.
+-- It is only safe to mmap a file if you know you are the sole
+-- user. Otherwise referential transparency may be compromised.
+--
+-- In case of IO errors all function use 'throwErrno'.
+--
+-- In case of 'ForeignPtr' or 'ByteString' functions the storage
+-- manager is used to free the mapped memory. When the garbage
+-- collector notices there are no further references to the mapped
+-- memory, a call to @munmap@ is made. It is not necessary to do this
+-- yourself. In tight memory situations, it may be profitable to use
+-- 'System.Mem.performGC' or 'finalizeForeignPtr' to force an unmap.
+--
+-- In functions returning Ptr use 'munmapFilePtr'.
+--
+-- File must exist before mapping it into memory. It also needs
+-- correct permissions for reading and/or writing (depending on mode).
+--
+-- If mode is 'ReadWrite' or 'WriteCopy', the returned memory region
+-- may be written to with 'Foreign.Storable.poke' and friends. In
+-- 'WriteCopy' mode changes will not be written to disk.  It is an
+-- error to modify mapped memory in 'ReadOnly' mode. If is undefined if
+-- and how changes from external sources affect your mmapped regions.
+--
+-- Range specified may be 'Nothing', in this case whole file will be
+-- mapped. Otherwise range should be 'Just (offset,size)' where
+-- offsets is the beginning byte of file region to map and size tells
+-- its length. There are no alignment requirements. Returned Ptr or
+-- ForeignPtr will be aligned to page size boundary and you'll be
+-- given offset to your data. Neither @offset@ nor @size@ cannot be
+-- negative.  Sum @offset + size@ should not be greater than file
+-- length. We do allow @size@ to be 0 and we do mmap files of 0
+-- length.
+--
+-- Range to map must not extend beyond end of file. Use @ftruncate@ or
+-- @SetFileSize@ if you want bigger files.
 --
 -- For more details about mmap, and its consequences, see:
 --
@@ -56,6 +90,32 @@ import qualified Data.ByteString.Lazy as BSL  (ByteString,fromChunks)
 --
 -- * <http://msdn2.microsoft.com/en-us/library/aa366781(VS.85).aspx>
 --
+-- Questions and Answers
+--
+-- * Q: What happens if somebody writes to mmapped file? A:
+-- Undefined. System is free to not synchronize write system call and
+-- mmap so nothing is sure. So this might be reflected in your memory
+-- or not.  This applies even in 'WriteCopy' mode.
+--
+-- * Q: What happens if I map 'ReadWrite' and change memory? A: After
+-- some time in will be written to disk. It is unspecified when this
+-- happens.
+--
+-- * Q: What if somebody removes my file? A: Undefined. File with
+-- mmapped region is treated as open file. Same rules apply.
+--
+-- * Q: Why can't I open my file for writting after mmaping it? A:
+-- File needs to be unmapped first. Either make sure you don't
+-- reference memory mapped regions and force garbage collection (this
+-- is hard to do). Or use mmaping with explicit memory management.
+--
+-- * Q: Can I map region after end of file? A: We forbid such
+-- situation in our library. Theoretically systems allow to map
+-- regions outside of file range, but accessing such memory is not
+-- allowed. Unless somebody resizes this file meanwhile, but then
+-- semantics diverge. Better to disable such possibility.
+--
+
 
 -- | Mode of mapping. Three cases are supported.
 data Mode = ReadOnly      -- ^ file is mapped read-only
@@ -64,39 +124,28 @@ data Mode = ReadOnly      -- ^ file is mapped read-only
     deriving (Eq,Ord,Enum)
 
 -- | The 'mmapFilePtr' function maps a file or device into memory,
--- returning a tripple containing pointer that accesses the mapped file,
--- the finalizer to run to unmap region and size of mmaped memory.
+-- returning a tuple @(ptr,rawsize,offset,size)@ where:
 --
--- If the mmap fails for some reason, an error is thrown.
+-- * @ptr@ is pointer to mmapped region
+--
+-- * @rawsize@ is length (in bytes) of mapped data, rawsize might be
+-- greater than size because of alignment
+--
+-- * @offset@ tell where your data lives: @plusPtr ptr offset@
+--
+-- * @size@ your data length (in bytes)
+--
+-- If 'mmapFilePtr' fails for some reason, a 'throwErrno' is used.
+--
+-- Use @munmapFilePtr ptr rawsize@ to unmap memory.
 --
 -- Memory mapped files will behave as if they were read lazily --
 -- pages from the file will be loaded into memory on demand.
 --
--- The storage manager is used to free the mapped memory. When
--- the garbage collector notices there are no further references to the
--- mapped memory, a call to munmap is made. It is not necessary to do
--- this yourself. In tight memory situations, it may be profitable to
--- use 'System.Mem.performGC' or 'finalizeForeignPtr' to force an unmap.
---
--- File must be created with correct attributes prior to mapping it
--- into memory.
---
--- If mode is 'ReadWrite' or 'WriteCopy', the returned memory region may
--- be written to with 'Foreign.Storable.poke' and friends.
---
--- Range specified may be 'Nothing', then whole file is mapped. Otherwise
--- range should be 'Just (offset,size)' where offsets is the beginning byte
--- of file region to map and size tells its length. There are no alignment
--- requirements.
---
--- Range to map must not extend beyond end of file in ReadOnly or WriteCopy mode.
--- In ReadWrite mode file will be extended as needed to cover offset plus size.
--- File will never be truncated.
---
 mmapFilePtr :: FilePath                     -- ^ name of file to mmap
             -> Mode                         -- ^ access mode
             -> Maybe (Int64,Int)            -- ^ range to map, maps whole file if Nothing
-            -> IO (Ptr a,Int,Int,Int)       -- ^ pointer to data, size, pointer to beginning, raw size of mmap
+            -> IO (Ptr a,Int,Int,Int)       -- ^ (ptr,rawsize,offset,size)
 mmapFilePtr filepath mode offsetsize = do
     bracket (mmapFileOpen filepath mode)
             (finalizeForeignPtr) mmap
@@ -135,13 +184,9 @@ mmapFileForeignPtr filepath mode range = do
   foreignptr <- newForeignPtrEnv c_system_io_mmap_munmap_funptr rawsizeptr rawptr
   return (foreignptr,offset,size)
 
--- | Maps region of file and returns it as 'Data.ByteString.ByteString'.
--- File is mapped in in 'ReadOnly' mode. See 'mmapFilePtr' for details
---
--- Note: this operation may break referential transparency! If
--- any other process on the system changes the file when it is mapped
--- into Haskell, the contents of your 'Data.ByteString.ByteString' may change.
---
+-- | Maps region of file and returns it as
+-- 'Data.ByteString.ByteString'.  File is mapped in in 'ReadOnly'
+-- mode. See 'mmapFilePtr' for details.
 mmapFileByteString :: FilePath                     -- ^ name of file to map
                    -> Maybe (Int64,Int)            -- ^ range to map, maps whole file if Nothing
                    -> IO BS.ByteString             -- ^ bytestring with file contents
@@ -151,37 +196,12 @@ mmapFileByteString filepath range = do
     return bytestring
 
 -- | The 'mmapFilePtrLazy' function maps a file or device into memory,
--- returning a list of tripples containing pointer that accesses the mapped file,
--- the finalizer to run to unmap that region and size of mapped memory.
---
--- If the mmap fails for some reason, an error is thrown.
---
--- Memory mapped files will behave as if they were read lazily --
--- pages from the file will be loaded into memory on demand.
---
--- The storage manager is used to free the mapped memory. When
--- the garbage collector notices there are no further references to the
--- mapped memory, a call to munmap is made. It is not necessary to do
--- this yourself. In tight memory situations, it may be profitable to
--- use 'System.Mem.performGC' or 'finalizeForeignPtr' to force an unmap.
---
--- File must be created with correct attributes prior to mapping it
--- into memory.
---
--- If mode is 'ReadWrite' or 'WriteCopy', the returned memory region may
--- be written to with 'Foreign.Storable.poke' and friends.
---
--- Range specified may be 'Nothing', then whole file is mapped. Otherwise
--- range should be 'Just (offset,size)' where offsets is the beginning byte
--- of file region to map and size tells its length. There are no alignment
--- requirements.
---
--- If range to map extends beyond end of file, it will be resized accordingly.
---
+-- returning a list of tuples with the same meaning as in function
+-- 'mmapFilePtr'.
 mmapFilePtrLazy :: FilePath                -- ^ name of file to mmap
             -> Mode                        -- ^ access mode
             -> Maybe (Int64,Int64)         -- ^ range to map, maps whole file if Nothing
-            -> IO [(Ptr a,Int,Int,Int)]    -- ^ list of pointer, finalizer and size
+            -> IO [(Ptr a,Int,Int,Int)]    -- ^ (ptr,rawsize,offset,size)
 mmapFilePtrLazy filepath mode offsetsize = do
     bracket (mmapFileOpen filepath mode)
             (finalizeForeignPtr) mmap
@@ -208,12 +228,12 @@ mmapFilePtrLazy filepath mode offsetsize = do
 chunks :: Int64 -> Int64 -> [(Int64,Int)]
 chunks offset 0 = []
 chunks offset size | size <= fromIntegral chunkSize = [(offset,fromIntegral size)]
-                   | otherwise = let offset2 = offset + fromIntegral chunkSize `div` fromIntegral chunkSize * fromIntegral chunkSize
-                                     size2 = fromIntegral (offset2 - offset)
-                                 in (offset,size2) : chunks (offset2) (size-fromIntegral size2)
+                   | otherwise = let offset2 = ((offset + chunkSize + chunkSize - 1) `div` chunkSize) * chunkSize
+                                     size2 = offset2 - offset
+                                 in (offset,fromIntegral size2) : chunks offset2 (size-size2)
 
--- | Maps region of file and returns it as list of 'ForeignPtr's. See 'mmapFilePtr' for details.
--- Each chunk is mapped in on demand only.
+-- | Maps region of file and returns it as list of 'ForeignPtr's. See
+-- 'mmapFilePtrLazy' and 'mmapFileForeignPtr' for details.
 mmapFileForeignPtrLazy :: FilePath                   -- ^ name of file to map
                    -> Mode                           -- ^ access mode
                    -> Maybe (Int64,Int64)            -- ^ range to map, maps whole file if Nothing
@@ -227,14 +247,9 @@ mmapFileForeignPtrLazy filepath mode offsetsize = do
             foreignptr <- newForeignPtrEnv c_system_io_mmap_munmap_funptr rawsizeptr ptr
             return (foreignptr,offset,size)
 
--- | Maps region of file and returns it as 'Data.ByteString.Lazy.ByteString'.
--- File is mapped in in 'ReadOnly' mode. See 'mmapFilePtrLazy' for details.
--- Chunks are mapped in on demand.
---
--- Note: this operation may break referential transparency! If
--- any other process on the system changes the file when it is mapped
--- into Haskell, the contents of your 'Data.ByteString.Lazy.ByteString' may change.
---
+-- | Maps region of file and returns it as
+-- 'Data.ByteString.Lazy.ByteString'. File is mapped in in 'ReadOnly'
+-- mode. See 'mmapFileForeignPtrLazy' for details.
 mmapFileByteStringLazy :: FilePath                     -- ^ name of file to map
                        -> Maybe (Int64,Int64)          -- ^ range to map, maps whole file if Nothing
                        -> IO BSL.ByteString            -- ^ bytestring with file content
@@ -244,13 +259,16 @@ mmapFileByteStringLazy filepath offsetsize = do
     where
         turn (foreignptr,offset,size) = BS.fromForeignPtr foreignptr offset size
 
-munmapFilePtr :: Ptr () -> Ptr a -> IO ()
-munmapFilePtr = c_system_io_mmap_munmap
+-- | Unmaps memory region. As parameters use values marked as ptr and rawsize in description of 'mmapFilePtr'.
+munmapFilePtr :: Ptr a  -- ^ pointer 
+              -> Int    -- ^ rawsize 
+              -> IO ()
+munmapFilePtr ptr rawsize = c_system_io_mmap_munmap (castIntToPtr rawsize) ptr
 
-munmapFilePtrFinalizer :: FunPtr(Ptr () -> Ptr a -> IO ())
-munmapFilePtrFinalizer = c_system_io_mmap_munmap_funptr
+--munmapFilePtrFinalizer :: FunPtr(Ptr () -> Ptr a -> IO ())
+--munmapFilePtrFinalizer = c_system_io_mmap_munmap_funptr
 
-chunkSize :: Int
+chunkSize :: Num a => a
 chunkSize = fromIntegral $ (128*1024 `div` c_system_io_granularity) * c_system_io_granularity
 
 mmapFileOpen :: FilePath -> Mode -> IO (ForeignPtr ())
@@ -291,7 +309,8 @@ foreign import ccall unsafe "HsMmap.h system_io_mmap_mmap"
 -- | Used in finalizers
 foreign import ccall unsafe "HsMmap.h &system_io_mmap_munmap"
     c_system_io_mmap_munmap_funptr :: FunPtr(Ptr () -> Ptr a -> IO ())
--- | Unmap region of memory. Size must be the same as returned by mmap. If size is zero, does nothing (treat pointer as invalid)
+-- | Unmap region of memory. Size must be the same as returned by
+-- mmap. If size is zero, does nothing (treat pointer as invalid)
 foreign import ccall unsafe "HsMmap.h system_io_mmap_munmap"
     c_system_io_mmap_munmap :: Ptr () -> Ptr a -> IO ()
 -- | Get file size in system specific manner
@@ -300,5 +319,3 @@ foreign import ccall unsafe "HsMmap.h system_io_mmap_file_size"
 -- | Memory mapping granularity.
 foreign import ccall unsafe "HsMmap.h system_io_mmap_granularity"
     c_system_io_granularity :: CInt
-
-
