@@ -5,6 +5,7 @@ module System.IO.MMap
 
      -- * Memory mapped files strict interface
      mmapFilePtr,
+     mmapWithFilePtr,
      mmapFileForeignPtr,
      mmapFileByteString,
 
@@ -33,7 +34,7 @@ import System.IO.Unsafe  (unsafePerformIO)
 import qualified Data.ByteString.Internal as BS (fromForeignPtr)
 import Data.Int (Int64)
 import Control.Monad  (when)
-import Control.Exception   (bracket)
+import Control.Exception   (bracket,finally)
 import qualified Data.ByteString as BS (ByteString)
 import qualified Data.ByteString.Lazy as BSL  (ByteString,fromChunks)
 
@@ -172,6 +173,21 @@ mmapFilePtr filepath mode offsetsize = do
             when (ptr == nullPtr) $
                   throwErrno $ "mmap of '" ++ filepath ++ "' failed"
             return (castPtr ptr,sizeraw,fromIntegral align,size)
+
+-- | Memory map region of file using autounmap semantics. See
+-- 'mmapFilePtr' for description of parameters.  The @action@ will be
+-- executed with tuple @(ptr,size)@ as single argument. This is the
+-- pointer to mapped data already adjusted and size of requested
+-- region. Return value is that of action.
+mmapWithFilePtr :: FilePath                        -- ^ name of file to mmap
+                -> Mode                            -- ^ access mode
+                -> Maybe (Int64,Int)               -- ^ range to map, maps whole file if Nothing
+                -> ((Ptr (),Int) -> IO a)          -- ^ action to run
+                -> IO a                            -- ^ (ptr,rawsize,offset,size)
+mmapWithFilePtr filepath mode offsetsize action = do
+    (ptr,rawsize,offset,size) <- mmapFilePtr filepath mode offsetsize
+    result <- action (ptr `plusPtr` offset,size) `finally` munmapFilePtr ptr rawsize
+    return result
 
 -- | Maps region of file and returns it as 'ForeignPtr'. See 'mmapFilePtr' for details.
 mmapFileForeignPtr :: FilePath                     -- ^ name of file to map
