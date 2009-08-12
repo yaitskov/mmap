@@ -23,7 +23,7 @@ where
 
 import System.IO ()
 import Foreign.Ptr (Ptr,FunPtr,nullPtr,plusPtr,minusPtr,castPtr)
-import Foreign.C.Types (CInt,CLLong)
+import Foreign.C.Types (CInt,CLLong,CSize)
 import Foreign.C.String (CString,withCString)
 import Foreign.ForeignPtr (ForeignPtr,withForeignPtr,finalizeForeignPtr,newForeignPtr,newForeignPtrEnv,newForeignPtr_)
 import Foreign.Storable( poke )
@@ -296,10 +296,6 @@ mmapFileOpen filepath mode = do
     handle <- newForeignPtr c_system_io_mmap_file_close ptr
     return handle
 
--- we need to return non null ptr to nowhere, sometimes
-nonZeroPtr :: Ptr a
-nonZeroPtr = nullPtr `plusPtr` 128
-
 castPtrToInt :: Ptr a -> Int
 castPtrToInt ptr = ptr `minusPtr` nullPtr
 
@@ -317,10 +313,10 @@ foreign import ccall unsafe "HsMmap.h &system_io_mmap_file_close"
 
 -- | Mmemory maps file from handle, using mode, starting offset and size
 foreign import ccall unsafe "HsMmap.h system_io_mmap_mmap"
-    c_system_io_mmap_mmap :: Ptr ()  -- ^ handle from c_system_io_mmap_file_open
-                          -> CInt    -- ^ mode
-                          -> CLLong  -- ^ starting offset, must be nonegative
-                          -> CInt    -- ^ length, must be greater than zero, in ReadOnly or WriteCopy offset+length must be less than file size
+    c_system_io_mmap_mmap :: Ptr ()     -- ^ handle from c_system_io_mmap_file_open
+                          -> CInt       -- ^ mode
+                          -> CLLong     -- ^ starting offset, must be nonegative
+                          -> CSize      -- ^ length, must be greater than zero, in ReadOnly or WriteCopy offset+length must be less than file size
                           -> IO (Ptr a) -- ^ starting pointer to byte data, nullPtr on error (plus errno set)
 -- | Used in finalizers
 foreign import ccall unsafe "HsMmap.h &system_io_mmap_munmap"

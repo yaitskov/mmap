@@ -73,7 +73,7 @@ void system_io_mmap_file_close(void *handle)
 static char zerolength[1];
 
 //foreign import ccall unsafe "system_io_mmap_mmap" c_system_io_mmap_mmap :: Ptr () -> CInt -> CLLong -> CInt -> IO (Ptr ())
-void *system_io_mmap_mmap(void *handle, int mode, long long offset, int size)
+void *system_io_mmap_mmap(void *handle, int mode, long long offset, size_t size)
 {
     /*
     HANDLE WINAPI CreateFileMapping(
@@ -150,7 +150,7 @@ void *system_io_mmap_mmap(void *handle, int mode, long long offset, int size)
  */
 void system_io_mmap_munmap(void *sizeasptr, void *ptr) // Ptr () -> Ptr a -> IO ()
 {
-    int size = (int)sizeasptr;
+    size_t size = (size_t)sizeasptr;
     BOOL result;
     if( size>0 ) {
         result = UnmapViewOfFile(ptr);

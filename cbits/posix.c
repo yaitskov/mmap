@@ -1,6 +1,6 @@
 #include "HsMmap.h"
 
-#define _LARGEFILE64_SOURCE1
+#define _LARGEFILE64_SOURCE 1
 #define _FILE_OFFSET_BITS 64
 
 #include <sys/types.h>
@@ -70,7 +70,7 @@ void system_io_mmap_file_close(void *handle)
 static char zerolength[1];
 
 //foreign import ccall unsafe "system_io_mmap_mmap" c_system_io_mmap_mmap :: Ptr () -> CInt -> CLLong -> CInt -> IO (Ptr ())
-void *system_io_mmap_mmap(void *handle, int mode, long long offset, int size)
+void *system_io_mmap_mmap(void *handle, int mode, long long offset, size_t size)
 {
     void *ptr = NULL;
     int prot;
@@ -120,7 +120,7 @@ void *system_io_mmap_mmap(void *handle, int mode, long long offset, int size)
 
 void system_io_mmap_munmap(void *sizeasptr, void *ptr) // Ptr CInt -> Ptr a -> IO ()
 {
-    int size = (int)sizeasptr;
+    size_t size = (size_t)sizeasptr;
     int result = 0;
     if( size>0 ) {
         result = munmap(ptr,size);
