@@ -11,7 +11,6 @@ import Foreign.Storable
 import Foreign.Ptr
 import System.Mem
 import Control.Concurrent
-import Control.Exception as E
 import Test.HUnit
 import System.Directory
 import Foreign.C.Types (CInt,CLLong)
@@ -37,7 +36,7 @@ Things to test:
 
 -}
 
-ignoreExceptions doit = (doit >> return ()) `E.catch` (\(e::SomeException) -> return ())
+ignoreExceptions doit = (doit >> return ()) `catch` (\e -> return ())
 
 foreign import ccall unsafe "HsMmap.h system_io_mmap_counters"
     c_system_io_counters :: IO CInt
