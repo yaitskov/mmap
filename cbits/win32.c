@@ -70,6 +70,8 @@ void system_io_mmap_file_close(void *handle)
 #endif
 }
 
+static char zerolength[1];
+
 //foreign import ccall unsafe "system_io_mmap_mmap" c_system_io_mmap_mmap :: Ptr () -> CInt -> CLLong -> CInt -> IO (Ptr ())
 void *system_io_mmap_mmap(void *handle, int mode, long long offset, int size)
 {
@@ -110,16 +112,22 @@ void *system_io_mmap_mmap(void *handle, int mode, long long offset, int size)
         default:
             return NULL;
     }
+    
+    if( size>0 ) {
 
-    mapping = CreateFileMapping(handle, NULL, flProtect, (DWORD) ((offset + size)>>32), (DWORD)(offset + size), NULL);
-    if( !mapping ) {
-      DWORD dw = GetLastError();
+        mapping = CreateFileMapping(handle, NULL, flProtect, (DWORD) ((offset + size)>>32), (DWORD)(offset + size), NULL);
+        if( !mapping ) {
+            DWORD dw = GetLastError();
+        }
+        ptr = MapViewOfFile(mapping,dwDesiredAccess, (DWORD)(offset>>32), (DWORD)(offset), size );
+        if( !ptr ) {
+            DWORD dw = GetLastError();
+        }
+        CloseHandle(mapping);
     }
-    ptr = MapViewOfFile(mapping,dwDesiredAccess, (DWORD)(offset>>32), (DWORD)(offset), size );
-    if( !ptr ) {
-      DWORD dw = GetLastError();
+    else {
+        ptr = zerolength;
     }
-    CloseHandle(mapping);
 #ifdef _DEBUG
     if( ptr ) {
         counters++;
@@ -130,8 +138,8 @@ void *system_io_mmap_mmap(void *handle, int mode, long long offset, int size)
 
 /*
  * MSDN states:
- * 
- * Although an application may close the file handle used to create a file mapping object, 
+ *
+ * Although an application may close the file handle used to create a file mapping object,
  * the system holds the corresponding file open until the last view of the file is unmapped:
  *
  * Files for which the last view has not yet been unmapped are held open with no sharing restrictions.
@@ -150,6 +158,11 @@ void system_io_mmap_munmap(void *sizeasptr, void *ptr) // Ptr () -> Ptr a -> IO 
         if( result ) {
             counters--;
         }
+#endif
+    }
+    else {
+#ifdef _DEBUG
+        counters--;
 #endif
     }
 }

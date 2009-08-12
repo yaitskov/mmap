@@ -102,7 +102,7 @@ test_normal_offset_size_zero_readonly = do
     bs @?= exp
 
 test_normal_offset_beyond_eof_readonly = do
-    let filename = "test_normal6.bin"
+    let filename = "test_normal9.bin"
     BSC.writeFile filename content
     ignoreExceptions $ do
         mmapFileByteString filename (Just (1000,5))

@@ -50,6 +50,9 @@ void *system_io_mmap_file_open(const char *filepath, int mode)
     if( fd == -1 ) {
         return NULL;
     }
+#ifdef _DEBUG
+    counters++;
+#endif
     handle = (void *)fd + 1;
     return handle;
 }
@@ -59,9 +62,12 @@ void system_io_mmap_file_close(void *handle)
 {
     int fd = (int)handle - 1;
     close(fd);
+#ifdef _DEBUG
+    counters--;
+#endif
 }
 
-
+static char zerolength[1];
 
 //foreign import ccall unsafe "system_io_mmap_mmap" c_system_io_mmap_mmap :: Ptr () -> CInt -> CLLong -> CInt -> IO (Ptr ())
 void *system_io_mmap_mmap(void *handle, int mode, long long offset, int size)
@@ -93,19 +99,41 @@ void *system_io_mmap_mmap(void *handle, int mode, long long offset, int size)
 	ftruncate(fd,offset+size);
     }
 
-    ptr = mmap(NULL,size,prot,flags,fd,offset);
+    if( size>0 ) {
+        ptr = mmap(NULL,size,prot,flags,fd,offset);
 
-    if( ptr == MAP_FAILED ) {
-	return NULL;
+        if( ptr == MAP_FAILED ) {
+	    return NULL;
+        }
     }
+    else {
+        ptr = zerolength;
+    }
+#ifdef _DEBUG
+    if( ptr ) {
+        counters++;
+    }
+#endif
+
     return ptr;
 }
 
 void system_io_mmap_munmap(void *sizeasptr, void *ptr) // Ptr CInt -> Ptr a -> IO ()
 {
     int size = (int)sizeasptr;
-    if( size ) {
-        munmap(ptr,size);
+    int result = 0;
+    if( size>0 ) {
+        result = munmap(ptr,size);
+#ifdef _DEBUG
+        if( result==0 ) {
+             counters--;
+        }
+#endif
+    }
+    else {
+#ifdef _DEBUG
+         counters--;
+#endif
     }
 }
 

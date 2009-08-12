@@ -22,7 +22,7 @@ module System.IO.MMap
 where
 
 import System.IO ()
-import Foreign.Ptr (Ptr,FunPtr,nullPtr,plusPtr,minusPtr)
+import Foreign.Ptr (Ptr,FunPtr,nullPtr,plusPtr,minusPtr,castPtr)
 import Foreign.C.Types (CInt,CLLong)
 import Foreign.C.String (CString,withCString)
 import Foreign.ForeignPtr (ForeignPtr,withForeignPtr,finalizeForeignPtr,newForeignPtr,newForeignPtrEnv,newForeignPtr_)
@@ -31,7 +31,7 @@ import Foreign.Marshal.Alloc( malloc, mallocBytes, free )
 import Foreign.C.Error ( throwErrno )
 import qualified Foreign.Concurrent( newForeignPtr )
 import System.IO.Unsafe  (unsafePerformIO)
-import qualified Data.ByteString.Unsafe as BS (unsafePackCStringFinalizer)
+import qualified Data.ByteString.Internal as BS (fromForeignPtr)
 import Data.Int (Int64)
 import Control.Monad  (when)
 import Control.Exception   (bracket)
@@ -93,68 +93,47 @@ data Mode = ReadOnly      -- ^ file is mapped read-only
 -- In ReadWrite mode file will be extended as needed to cover offset plus size.
 -- File will never be truncated.
 --
-mmapFilePtr :: FilePath                -- ^ name of file to mmap
-            -> Mode                    -- ^ access mode
-            -> Maybe (Int64,Int)       -- ^ range to map, maps whole file if Nothing
-            -> IO (Ptr a,IO (),Int)    -- ^ pointer, finalizer and size
-mmapFilePtr fp m range = do
-  (ptr, size) <- mmapFilePtr' fp m range
-  if size>0 
-      then do
-              let sizeptr = castIntToPtr size
-              return (ptr, c_system_io_mmap_munmap sizeptr ptr, size)
-      else do
-              return (nonZeroPtr,return (),0)
-
--- | Maps region of file and returns it as 'ForeignPtr'. See 'mmapFilePtr' for details.
-mmapFileForeignPtr :: FilePath                     -- ^ name of file to map
-                   -> Mode                         -- ^ access mode
-                   -> Maybe (Int64,Int)            -- ^ range to map, maps whole file if Nothing
-                   -> IO (ForeignPtr a,Int)        -- ^ foreign pointer to beginning of region and size
-mmapFileForeignPtr fp m range = do
-  (ptr, size) <- mmapFilePtr' fp m range
-  if size>0
-    then do
-        let sizeptr = castIntToPtr size
-        foreignptr <- newForeignPtrEnv c_system_io_mmap_munmap_funptr sizeptr ptr
-        return (foreignptr,size)
-    else do
-        foreignptr <- newForeignPtr_ nonZeroPtr
-        return (foreignptr,size)
-
-mmapFilePtr' :: FilePath                -- ^ name of file to mmap
-             -> Mode                    -- ^ access mode
-             -> Maybe (Int64,Int)       -- ^ range to map, maps whole file if Nothing
-             -> IO (Ptr a,Int)          -- ^ pointer and size
-mmapFilePtr' filepath mode offsetsize = do
+mmapFilePtr :: FilePath                     -- ^ name of file to mmap
+            -> Mode                         -- ^ access mode
+            -> Maybe (Int64,Int)            -- ^ range to map, maps whole file if Nothing
+            -> IO (Ptr a,Int,Int,Int)       -- ^ pointer to data, size, pointer to beginning, raw size of mmap
+mmapFilePtr filepath mode offsetsize = do
     bracket (mmapFileOpen filepath mode)
             (finalizeForeignPtr) mmap
     where
         mmap handle = withForeignPtr handle $ \handle -> do
-            longsize <- c_system_io_file_size handle
+            longsize <- c_system_io_file_size handle >>= \x -> return (fromIntegral x)
             (offset,size) <- case offsetsize of
                 Just (offset,size) -> do
                     when (size<0) $
                          throwErrno $ "mmap of '" ++ filepath ++ "' failed, negative size reguested"
                     when (offset<0) $
                          throwErrno $ "mmap of '" ++ filepath ++ "' failed, negative offset reguested"
-                    when (fromIntegral longsize<offset || fromIntegral longsize<offset + fromIntegral size) $
+                    when (longsize<offset || longsize<(offset + fromIntegral size)) $
                          throwErrno $ "mmap of '" ++ filepath ++ "' failed, offset and size beyond end of file"
                     return (offset,size)
                 Nothing -> do
                     when (longsize > fromIntegral (maxBound :: Int)) $
                          fail ("file is longer (" ++ show longsize ++ ") than maxBound::Int")
                     return (0,fromIntegral longsize)
-            if size==0
-                then return (nullPtr,0)
-                else do
-                      let align = offset `mod` fromIntegral c_system_io_granularity
-                          offsetraw = offset - align
-                          sizeraw = size + fromIntegral align
-                      ptr <- c_system_io_mmap_mmap handle (fromIntegral $ fromEnum mode) (fromIntegral offsetraw) (fromIntegral sizeraw)
-                      when (ptr == nullPtr) $
-                            throwErrno $ "mmap of '" ++ filepath ++ "' failed"
-                      return (ptr `plusPtr` fromIntegral align,fromIntegral size)
+            let align = offset `mod` fromIntegral c_system_io_granularity
+            let offsetraw = offset - align
+            let sizeraw = size + fromIntegral align
+            ptr <- c_system_io_mmap_mmap handle (fromIntegral $ fromEnum mode) (fromIntegral offsetraw) (fromIntegral sizeraw)
+            when (ptr == nullPtr) $
+                  throwErrno $ "mmap of '" ++ filepath ++ "' failed"
+            return (castPtr ptr,sizeraw,fromIntegral align,size)
+
+-- | Maps region of file and returns it as 'ForeignPtr'. See 'mmapFilePtr' for details.
+mmapFileForeignPtr :: FilePath                     -- ^ name of file to map
+                   -> Mode                         -- ^ access mode
+                   -> Maybe (Int64,Int)            -- ^ range to map, maps whole file if Nothing
+                   -> IO (ForeignPtr a,Int,Int)    -- ^ foreign pointer to beginning of raw region, offset to your data and size of your data
+mmapFileForeignPtr filepath mode range = do
+  (rawptr,rawsize,offset,size) <- mmapFilePtr filepath mode range
+  let rawsizeptr = castIntToPtr rawsize
+  foreignptr <- newForeignPtrEnv c_system_io_mmap_munmap_funptr rawsizeptr rawptr
+  return (foreignptr,offset,size)
 
 -- | Maps region of file and returns it as 'Data.ByteString.ByteString'.
 -- File is mapped in in 'ReadOnly' mode. See 'mmapFilePtr' for details
@@ -166,9 +145,9 @@ mmapFilePtr' filepath mode offsetsize = do
 mmapFileByteString :: FilePath                     -- ^ name of file to map
                    -> Maybe (Int64,Int)            -- ^ range to map, maps whole file if Nothing
                    -> IO BS.ByteString             -- ^ bytestring with file contents
-mmapFileByteString filepath offsetsize = do
-    (ptr,finalizer,size) <- mmapFilePtr filepath ReadOnly offsetsize
-    bytestring <- BS.unsafePackCStringFinalizer ptr size finalizer
+mmapFileByteString filepath range = do
+    (foreignptr,offset,size) <- mmapFileForeignPtr filepath ReadOnly range
+    let bytestring = BS.fromForeignPtr foreignptr offset size
     return bytestring
 
 -- | The 'mmapFilePtrLazy' function maps a file or device into memory,
@@ -202,10 +181,10 @@ mmapFileByteString filepath offsetsize = do
 mmapFilePtrLazy :: FilePath                -- ^ name of file to mmap
             -> Mode                        -- ^ access mode
             -> Maybe (Int64,Int64)         -- ^ range to map, maps whole file if Nothing
-            -> IO [(Ptr a,IO (),Int)]      -- ^ list of pointer, finalizer and size
+            -> IO [(Ptr a,Int,Int,Int)]    -- ^ list of pointer, finalizer and size
 mmapFilePtrLazy filepath mode offsetsize = do
-    handle <- mmapFileOpen filepath mode
-    mmap handle
+    bracket (mmapFileOpen filepath mode)
+            (finalizeForeignPtr) mmap
     where
         mmap handle = do
             (offset,size) <- case offsetsize of
@@ -224,7 +203,7 @@ mmapFilePtrLazy filepath mode offsetsize = do
                      throwErrno $ "mmap of '" ++ filepath ++ "' failed"
                 let sizeptr = castIntToPtr size
                 let finalizer = c_system_io_mmap_munmap sizeptr ptr
-                return (ptr `plusPtr` fromIntegral align,finalizer,fromIntegral size)
+                return (ptr,sizeraw,fromIntegral align,size)
 
 chunks :: Int64 -> Int64 -> [(Int64,Int)]
 chunks offset 0 = []
@@ -238,14 +217,15 @@ chunks offset size | size <= fromIntegral chunkSize = [(offset,fromIntegral size
 mmapFileForeignPtrLazy :: FilePath                   -- ^ name of file to map
                    -> Mode                           -- ^ access mode
                    -> Maybe (Int64,Int64)            -- ^ range to map, maps whole file if Nothing
-                   -> IO [(ForeignPtr a,Int)]        -- ^ foreign pointer to beginning of region and size
+                   -> IO [(ForeignPtr a,Int,Int)]    -- ^ foreign pointer to beginning of region and size
 mmapFileForeignPtrLazy filepath mode offsetsize = do
     list <- mmapFilePtrLazy filepath mode offsetsize
     return (map turn list)
     where
-        turn (ptr,finalizer,size) = unsafePerformIO $ do
-            foreignptr <- Foreign.Concurrent.newForeignPtr ptr finalizer
-            return (foreignptr,size)
+        turn (ptr,rawsize,offset,size) = unsafePerformIO $ do
+            let rawsizeptr = castIntToPtr rawsize
+            foreignptr <- newForeignPtrEnv c_system_io_mmap_munmap_funptr rawsizeptr ptr
+            return (foreignptr,offset,size)
 
 -- | Maps region of file and returns it as 'Data.ByteString.Lazy.ByteString'.
 -- File is mapped in in 'ReadOnly' mode. See 'mmapFilePtrLazy' for details.
@@ -259,12 +239,10 @@ mmapFileByteStringLazy :: FilePath                     -- ^ name of file to map
                        -> Maybe (Int64,Int64)          -- ^ range to map, maps whole file if Nothing
                        -> IO BSL.ByteString            -- ^ bytestring with file content
 mmapFileByteStringLazy filepath offsetsize = do
-    list <- mmapFilePtrLazy filepath ReadOnly offsetsize
+    list <- mmapFileForeignPtrLazy filepath ReadOnly offsetsize
     return (BSL.fromChunks (map turn list))
     where
-        turn (ptr,finalizer,size) = unsafePerformIO $ do
-            bytestring <- BS.unsafePackCStringFinalizer ptr size finalizer
-            return bytestring
+        turn (foreignptr,offset,size) = BS.fromForeignPtr foreignptr offset size
 
 munmapFilePtr :: Ptr () -> Ptr a -> IO ()
 munmapFilePtr = c_system_io_mmap_munmap
