@@ -53,14 +53,14 @@ void *system_io_mmap_file_open(const char *filepath, int mode)
 #ifdef _DEBUG
     counters++;
 #endif
-    handle = (void *)fd + 1;
+    handle = (void *)((intptr_t)fd + 1);
     return handle;
 }
 
 //foreign import ccall unsafe "system_io_mmap_file_close" c_system_io_mmap_file_close :: FunPtr(Ptr () -> IO ())
 void system_io_mmap_file_close(void *handle)
 {
-    int fd = (int)handle - 1;
+    int fd = (int)(intptr_t)handle - 1;
     close(fd);
 #ifdef _DEBUG
     counters--;
@@ -75,7 +75,7 @@ void *system_io_mmap_mmap(void *handle, int mode, long long offset, size_t size)
     void *ptr = NULL;
     int prot;
     int flags;
-    int fd = (int)handle - 1;
+    int fd = (int)(intptr_t)handle - 1;
     switch(mode) {
     case 0:
 	prot = PROT_READ;
@@ -140,7 +140,7 @@ void system_io_mmap_munmap(void *sizeasptr, void *ptr) // Ptr CInt -> Ptr a -> I
 //foreign import ccall unsafe "system_io_mmap_file_size" c_system_io_file_size :: Ptr () -> IO (CLLong)
 long long system_io_mmap_file_size(void *handle)
 {
-    int fd = (int)handle - 1;
+  int fd = (int)(intptr_t)handle - 1;
     struct stat st;
     fstat(fd,&st);
     return st.st_size;
