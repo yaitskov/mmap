@@ -7,7 +7,7 @@ void system_io_mmap_file_close(void *handle);
 
 void *system_io_mmap_mmap(void *handle, int mode, long long offset, int size);
 
-void system_io_mmap_munmap(int *size, void *ptr);
+void system_io_mmap_munmap(void *sizeasptr, void *ptr);
 
 long long system_io_mmap_file_size(void *handle);
 

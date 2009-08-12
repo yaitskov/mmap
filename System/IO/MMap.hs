@@ -25,7 +25,7 @@ import System.IO ()
 import Foreign.Ptr (Ptr,FunPtr,nullPtr,plusPtr,minusPtr)
 import Foreign.C.Types (CInt,CLLong)
 import Foreign.C.String (CString,withCString)
-import Foreign.ForeignPtr (ForeignPtr,withForeignPtr,finalizeForeignPtr,newForeignPtr,newForeignPtrEnv,mallocForeignPtrBytes)
+import Foreign.ForeignPtr (ForeignPtr,withForeignPtr,finalizeForeignPtr,newForeignPtr,newForeignPtrEnv,newForeignPtr_)
 import Foreign.Storable( poke )
 import Foreign.Marshal.Alloc( malloc, mallocBytes, free )
 import Foreign.C.Error ( throwErrno )
@@ -101,12 +101,10 @@ mmapFilePtr fp m range = do
   (ptr, size) <- mmapFilePtr' fp m range
   if size>0 
       then do
-              sizeptr <- malloc
-              poke sizeptr (fromIntegral size)
+              let sizeptr = castIntToPtr size
               return (ptr, c_system_io_mmap_munmap sizeptr ptr, size)
       else do
-              ptr <- mallocBytes 1
-              return (ptr,free ptr,0)
+              return (nonZeroPtr,return (),0)
 
 -- | Maps region of file and returns it as 'ForeignPtr'. See 'mmapFilePtr' for details.
 mmapFileForeignPtr :: FilePath                     -- ^ name of file to map
@@ -117,12 +115,11 @@ mmapFileForeignPtr fp m range = do
   (ptr, size) <- mmapFilePtr' fp m range
   if size>0
     then do
-        sizeptr <- malloc
-        poke sizeptr (fromIntegral size)
+        let sizeptr = castIntToPtr size
         foreignptr <- newForeignPtrEnv c_system_io_mmap_munmap_funptr sizeptr ptr
         return (foreignptr,size)
     else do
-        foreignptr <- mallocForeignPtrBytes 1
+        foreignptr <- newForeignPtr_ nonZeroPtr
         return (foreignptr,size)
 
 mmapFilePtr' :: FilePath                -- ^ name of file to mmap
@@ -225,8 +222,7 @@ mmapFilePtrLazy filepath mode offsetsize = do
                 ptr <- c_system_io_mmap_mmap handle (fromIntegral $ fromEnum mode) (fromIntegral offsetraw) (fromIntegral sizeraw)
                 when (ptr == nullPtr) $
                      throwErrno $ "mmap of '" ++ filepath ++ "' failed"
-                sizeptr <- malloc
-                poke sizeptr $ fromIntegral sizeraw
+                let sizeptr = castIntToPtr size
                 let finalizer = c_system_io_mmap_munmap sizeptr ptr
                 return (ptr `plusPtr` fromIntegral align,finalizer,fromIntegral size)
 
@@ -270,10 +266,10 @@ mmapFileByteStringLazy filepath offsetsize = do
             bytestring <- BS.unsafePackCStringFinalizer ptr size finalizer
             return bytestring
 
-munmapFilePtr :: Ptr CInt -> Ptr a -> IO ()
+munmapFilePtr :: Ptr () -> Ptr a -> IO ()
 munmapFilePtr = c_system_io_mmap_munmap
 
-munmapFilePtrFinalizer :: FunPtr(Ptr CInt -> Ptr a -> IO ())
+munmapFilePtrFinalizer :: FunPtr(Ptr () -> Ptr a -> IO ())
 munmapFilePtrFinalizer = c_system_io_mmap_munmap_funptr
 
 chunkSize :: Int
@@ -316,10 +312,10 @@ foreign import ccall unsafe "HsMmap.h system_io_mmap_mmap"
                           -> IO (Ptr a) -- ^ starting pointer to byte data, nullPtr on error (plus errno set)
 -- | Used in finalizers
 foreign import ccall unsafe "HsMmap.h &system_io_mmap_munmap"
-    c_system_io_mmap_munmap_funptr :: FunPtr(Ptr CInt -> Ptr a -> IO ())
+    c_system_io_mmap_munmap_funptr :: FunPtr(Ptr () -> Ptr a -> IO ())
 -- | Unmap region of memory. Size must be the same as returned by mmap. If size is zero, does nothing (treat pointer as invalid)
 foreign import ccall unsafe "HsMmap.h system_io_mmap_munmap"
-    c_system_io_mmap_munmap :: Ptr CInt -> Ptr a -> IO ()
+    c_system_io_mmap_munmap :: Ptr () -> Ptr a -> IO ()
 -- | Get file size in system specific manner
 foreign import ccall unsafe "HsMmap.h system_io_mmap_file_size"
     c_system_io_file_size :: Ptr () -> IO CLLong

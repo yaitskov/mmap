@@ -140,15 +140,18 @@ void *system_io_mmap_mmap(void *handle, int mode, long long offset, int size)
  *
  * http://msdn.microsoft.com/en-us/library/aa366882(VS.85).aspx
  */
-void system_io_mmap_munmap(int *size, void *ptr) // Ptr CInt -> Ptr a -> IO ()
+void system_io_mmap_munmap(void *sizeasptr, void *ptr) // Ptr () -> Ptr a -> IO ()
 {
-    BOOL result = UnmapViewOfFile(ptr);
+    int size = (int)sizeasptr;
+    BOOL result;
+    if( size>0 ) {
+        result = UnmapViewOfFile(ptr);
 #ifdef _DEBUG
-    if( result ) {
-        counters--;
-    }
+        if( result ) {
+            counters--;
+        }
 #endif
-    free(size);
+    }
 }
 
 //foreign import ccall unsafe "system_io_mmap_file_size" c_system_io_file_size :: Ptr () -> IO (CLLong)

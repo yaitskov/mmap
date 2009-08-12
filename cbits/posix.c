@@ -101,10 +101,12 @@ void *system_io_mmap_mmap(void *handle, int mode, long long offset, int size)
     return ptr;
 }
 
-void system_io_mmap_munmap(int *size, void *ptr) // Ptr CInt -> Ptr a -> IO ()
+void system_io_mmap_munmap(void *sizeasptr, void *ptr) // Ptr CInt -> Ptr a -> IO ()
 {
-    munmap(ptr,*size);
-    free(size);
+    int size = (int)sizeasptr;
+    if( size ) {
+        munmap(ptr,size);
+    }
 }
 
 //foreign import ccall unsafe "system_io_mmap_file_size" c_system_io_file_size :: Ptr () -> IO (CLLong)
