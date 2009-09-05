@@ -43,6 +43,10 @@ void *system_io_mmap_file_open(const char *filepath, int mode)
             dwDesiredAccess = GENERIC_READ;
             dwCreationDisposition = OPEN_EXISTING;
             break;
+        case 3:
+            dwDesiredAccess = GENERIC_WRITE|GENERIC_READ;
+            dwCreationDisposition = OPEN_ALWAYS;
+            break;
         default:
             return NULL;
     }
@@ -108,6 +112,10 @@ void *system_io_mmap_mmap(void *handle, int mode, long long offset, size_t size)
         case 2:
             flProtect = PAGE_WRITECOPY;
             dwDesiredAccess = FILE_MAP_COPY;
+            break;
+        case 3:
+            flProtect = PAGE_READWRITE;
+            dwDesiredAccess = FILE_MAP_WRITE;
             break;
         default:
             return NULL;
