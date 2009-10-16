@@ -16,7 +16,7 @@ Description:
 Cabal-version: >= 1.2
 Category: System
 Build-type: Simple
-Extra-Source-Files: HsMmap.h
+Extra-Source-Files: cbits/HsMmap.h
 
 Flag mmaptest
   Description: Generate mmaptest executable
