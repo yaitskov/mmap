@@ -125,11 +125,13 @@ void *system_io_mmap_mmap(void *handle, int mode, long long offset, size_t size)
 
         mapping = CreateFileMapping(handle, NULL, flProtect, (DWORD) ((offset + size)>>32), (DWORD)(offset + size), NULL);
         if( !mapping ) {
-            DWORD dw = GetLastError();
+            // FIXME: check error code and translate this to errno
+            // DWORD dw = GetLastError();
         }
         ptr = MapViewOfFile(mapping,dwDesiredAccess, (DWORD)(offset>>32), (DWORD)(offset), size );
         if( !ptr ) {
-            DWORD dw = GetLastError();
+            // FIXME: check error code and translate this to errno
+            // DWORD dw = GetLastError();
         }
         CloseHandle(mapping);
     }

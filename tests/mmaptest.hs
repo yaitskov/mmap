@@ -4,6 +4,7 @@ module Main where
 
 import System.IO.MMap
 import Data.ByteString.Char8 as BSC
+import Data.ByteString.Unsafe as BSC
 import qualified Data.ByteString.Lazy as BSL
 import Data.Word
 import Foreign.ForeignPtr
@@ -115,6 +116,31 @@ test_normal_offset_plus_size_beyond_eof_readonly = do
         mmapFileByteString filename (Just (4,5000))
         assertFailure "Should throw exception"
 
+test_normal_offset_plus_size_beyond_eof_readwriteex = do
+    let filename = "test_normal8.bin"
+    BSC.writeFile filename content
+    mmapWithFilePtr filename ReadWriteEx (Just (4,5000)) $ \(ptr,size) -> do
+        size @?= 5000
+        bs <- BSC.unsafePackCStringLen (castPtr ptr,size) 
+        bs @?= BSC.take 5000 (BSC.drop 4 (content `BSC.append` BSC.replicate 10000 '\0'))
+
+test_create_offset_plus_size_readwriteex = do
+    let filename = "test_normal9.bin"
+    ignoreExceptions $ removeFile filename
+    mmapWithFilePtr filename ReadWriteEx (Just (4,5000)) $ \(ptr,size) -> do
+        size @?= 5000
+        bs <- BSC.unsafePackCStringLen (castPtr ptr,size) 
+        bs @?= BSC.replicate 5000 '\0'
+
+test_create_nothing_readwriteex_should_throw = do
+    let filename = "test_normalA.bin"
+    ignoreExceptions $ removeFile filename
+    ignoreExceptions $ mmapWithFilePtr filename ReadWriteEx Nothing $ \(ptr,size) -> do
+        size @?= 5000
+        bs <- BSC.unsafePackCStringLen (castPtr ptr,size)
+        bs @?= BSC.replicate 5000 '\0'
+        assertFailure "Should throw exception"
+
 test_counters_zero = do
     System.Mem.performGC
     threadDelay 1000
@@ -131,6 +157,9 @@ alltests = [ "Normal read only mmap" ~: test_normal_readonly
            , "Test if we can cut zero length part of file" ~: test_normal_offset_size_zero_readonly
            , "Should throw error if mmaping readonly beyond end of file" ~: test_normal_offset_beyond_eof_readonly
            , "Should throw error if mmaping readonly with size beyond end of file" ~: test_normal_offset_plus_size_beyond_eof_readonly
+           , "Should ReadWriteEx mmap existing file and resize" ~: test_normal_offset_plus_size_beyond_eof_readwriteex
+           , "Should ReadWriteEx mmap new file and resize" ~: test_create_offset_plus_size_readwriteex
+           , "ReadWriteEx must have range specified" ~: test_create_nothing_readwriteex_should_throw
 
            -- insert tests above this line
            , "Counters should be zero" ~: test_counters_zero

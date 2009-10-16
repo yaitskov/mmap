@@ -27,13 +27,13 @@ import Foreign.C.String (CString,withCString)
 import Foreign.ForeignPtr (ForeignPtr,withForeignPtr,finalizeForeignPtr,newForeignPtr,newForeignPtrEnv,newForeignPtr_)
 import Foreign.Storable( poke )
 import Foreign.Marshal.Alloc( malloc, mallocBytes, free )
-import Foreign.C.Error ( throwErrno )
+import Foreign.C.Error
 import qualified Foreign.Concurrent( newForeignPtr )
 import System.IO.Unsafe  (unsafePerformIO)
 import qualified Data.ByteString.Internal as BS (fromForeignPtr)
 import Data.Int (Int64)
 import Control.Monad  (when)
-import Control.Exception   (bracket,finally)
+import Control.Exception
 import qualified Data.ByteString as BS (ByteString)
 import qualified Data.ByteString.Lazy as BSL  (ByteString,fromChunks)
 
@@ -109,12 +109,13 @@ import qualified Data.ByteString.Lazy as BSL  (ByteString,fromChunks)
 -- * Q: Why can't I open my file for writting after mmaping it? A:
 -- File needs to be unmapped first. Either make sure you don't
 -- reference memory mapped regions and force garbage collection (this
--- is hard to do). Or use mmaping with explicit memory management.
+-- is hard to do). Or better yet use mmaping with explicit memory management.
 --
--- * Q: Can I map region after end of file? A: We forbid such
+-- * Q: Can I map region after end of file? A: You need to use ReadWriteEx mode, otherwise
+-- we forbid such
 -- situation in our library. Theoretically systems allow to map
 -- regions outside of file range, but accessing such memory is not
--- allowed. Unless somebody resizes this file meanwhile, but then
+-- allowed unless somebody resizes this file meanwhile, but then
 -- semantics diverge. Better to disable such possibility.
 --
 
@@ -128,6 +129,8 @@ data Mode = ReadOnly         -- ^ file is mapped read-only, file must exist
     deriving (Eq,Ord,Enum)
 
 sanitizeFileRegion :: (Integral a,Bounded a) => String -> ForeignPtr () -> Mode -> Maybe (Int64,a) -> IO (Int64,a)
+sanitizeFileRegion filepath handle ReadWriteEx (Just region) = return region
+sanitizeFileRegion filepath handle ReadWriteEx _ = ioError (errnoToIOError "mmap ReadWriteEx must have explicit region" eINVAL Nothing (Just filepath))
 sanitizeFileRegion filepath handle mode region = withForeignPtr handle $ \handle -> do
     longsize <- c_system_io_file_size handle >>= \x -> return (fromIntegral x)
     let Just (_,sizetype) = region
@@ -193,7 +196,7 @@ mmapWithFilePtr :: FilePath                        -- ^ name of file to mmap
                 -> Mode                            -- ^ access mode
                 -> Maybe (Int64,Int)               -- ^ range to map, maps whole file if Nothing
                 -> ((Ptr (),Int) -> IO a)          -- ^ action to run
-                -> IO a                            -- ^ (ptr,rawsize,offset,size)
+                -> IO a                            -- ^ result of action
 mmapWithFilePtr filepath mode offsetsize action = do
     (ptr,rawsize,offset,size) <- mmapFilePtr filepath mode offsetsize
     result <- action (ptr `plusPtr` offset,size) `finally` munmapFilePtr ptr rawsize
