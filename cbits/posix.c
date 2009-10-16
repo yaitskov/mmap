@@ -37,6 +37,9 @@ void *system_io_mmap_file_open(const char *filepath, int mode)
     case 2:
 	access = O_RDONLY;
 	break;
+    case 3:
+	access = O_RDWR|O_CREAT;
+	break;
     default:
 	return NULL;
     }
@@ -45,6 +48,9 @@ void *system_io_mmap_file_open(const char *filepath, int mode)
 #endif
 #ifdef O_LARGEFILE
     access |= O_LARGEFILE;
+#endif
+#ifdef O_NOINHERIT
+    access |= O_NOINHERIT;
 #endif
     fd = open(filepath,access,0666);
     if( fd == -1 ) {
@@ -76,6 +82,8 @@ void *system_io_mmap_mmap(void *handle, int mode, long long offset, size_t size)
     int prot;
     int flags;
     int fd = (int)(intptr_t)handle - 1;
+    struct stat st;
+
     switch(mode) {
     case 0:
 	prot = PROT_READ;
@@ -89,14 +97,19 @@ void *system_io_mmap_mmap(void *handle, int mode, long long offset, size_t size)
 	prot = PROT_READ|PROT_WRITE;
 	flags = MAP_PRIVATE;
 	break;
+    case 3:
+	prot = PROT_READ|PROT_WRITE;
+	flags = MAP_SHARED;
+	break;
     default:
 	return NULL;
     }
 
-    struct stat st;
-    fstat(fd,&st);
-    if( st.st_size<offset+size) {
-	ftruncate(fd,offset+size);
+    if( mode==3 ) {
+	fstat(fd,&st);
+	if( st.st_size<offset+size) {
+	    ftruncate(fd,offset+size);
+	}
     }
 
     if( size>0 ) {
@@ -140,7 +153,7 @@ void system_io_mmap_munmap(void *sizeasptr, void *ptr) // Ptr CInt -> Ptr a -> I
 //foreign import ccall unsafe "system_io_mmap_file_size" c_system_io_file_size :: Ptr () -> IO (CLLong)
 long long system_io_mmap_file_size(void *handle)
 {
-  int fd = (int)(intptr_t)handle - 1;
+    int fd = (int)(intptr_t)handle - 1;
     struct stat st;
     fstat(fd,&st);
     return st.st_size;

@@ -40,5 +40,5 @@ main = do
     print (BSC.take 5 (BSC.drop 5 content) == BSC.concat (BSL.toChunks bs5))
 
     System.Mem.performGC
-    threadDelay 10000
+    threadDelay 1000
 
