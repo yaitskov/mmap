@@ -140,6 +140,8 @@ test_create_nothing_readwriteex_should_throw = do
         bs <- BSC.unsafePackCStringLen (castPtr ptr,size)
         bs @?= BSC.replicate 5000 '\0'
         assertFailure "Should throw exception"
+    x <- doesFileExist filename
+    x @?= False
 
 test_counters_zero = do
     System.Mem.performGC

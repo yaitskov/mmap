@@ -168,7 +168,7 @@ sanitizeFileRegion :: (Integral a,Bounded a) => String -> ForeignPtr () -> Mode 
 sanitizeFileRegion filepath handle ReadWriteEx (Just region) 
     = return region
 sanitizeFileRegion filepath handle ReadWriteEx _ 
-    = throw (errnoToIOError "mmap ReadWriteEx must have explicit region" eINVAL Nothing (Just filepath))
+    = error "sanitizeRegion given ReadWriteEx with no region, please check earlier for this"
 sanitizeFileRegion filepath handle mode region = withForeignPtr handle $ \handle -> do
     longsize <- c_system_io_file_size handle >>= \x -> return (fromIntegral x)
     let Just (_,sizetype) = region
@@ -187,6 +187,11 @@ sanitizeFileRegion filepath handle mode region = withForeignPtr handle $ \handle
             return (0,fromIntegral longsize)
     return (offset,size)
 
+checkModeRegion :: FilePath -> Mode -> Maybe a -> IO ()
+checkModeRegion filepath ReadWriteEx Nothing = 
+    throw (errnoToIOError "mmap ReadWriteEx must have explicit region" eINVAL Nothing (Just filepath))
+checkModeRegion _ _ _ = return ()
+
 -- | The 'mmapFilePtr' function maps a file or device into memory,
 -- returning a tuple @(ptr,rawsize,offset,size)@ where:
 --
@@ -203,14 +208,16 @@ sanitizeFileRegion filepath handle mode region = withForeignPtr handle $ \handle
 --
 -- Use @munmapFilePtr ptr rawsize@ to unmap memory.
 --
--- Memory mapped files will behave as if they were read lazily --
+-- Memory mapped files will behave as if they were read lazily 
 -- pages from the file will be loaded into memory on demand.
 --
+
 mmapFilePtr :: FilePath                     -- ^ name of file to mmap
             -> Mode                         -- ^ access mode
             -> Maybe (Int64,Int)            -- ^ range to map, maps whole file if Nothing
             -> IO (Ptr a,Int,Int,Int)       -- ^ (ptr,rawsize,offset,size)
 mmapFilePtr filepath mode offsetsize = do
+    checkModeRegion filepath mode offsetsize
     bracket (mmapFileOpen filepath mode)
             (finalizeForeignPtr) mmap
     where
@@ -237,6 +244,7 @@ mmapWithFilePtr :: FilePath                        -- ^ name of file to mmap
                 -> ((Ptr (),Int) -> IO a)          -- ^ action to run
                 -> IO a                            -- ^ result of action
 mmapWithFilePtr filepath mode offsetsize action = do
+    checkModeRegion filepath mode offsetsize
     (ptr,rawsize,offset,size) <- mmapFilePtr filepath mode offsetsize
     result <- action (ptr `plusPtr` offset,size) `finally` munmapFilePtr ptr rawsize
     return result
@@ -248,6 +256,7 @@ mmapFileForeignPtr :: FilePath                     -- ^ name of file to map
                    -> IO (ForeignPtr a,Int,Int)    -- ^ foreign pointer to beginning of raw region, 
                                                    -- offset to your data and size of your data
 mmapFileForeignPtr filepath mode range = do
+    checkModeRegion filepath mode range
     (rawptr,rawsize,offset,size) <- mmapFilePtr filepath mode range
     let rawsizeptr = castIntToPtr rawsize
     foreignptr <- newForeignPtrEnv c_system_io_mmap_munmap_funptr rawsizeptr rawptr
@@ -272,6 +281,7 @@ mmapFileForeignPtrLazy :: FilePath                    -- ^ name of file to mmap
                        -> Maybe (Int64,Int64)         -- ^ range to map, maps whole file if Nothing
                        -> IO [(ForeignPtr a,Int,Int)] -- ^ (ptr,offset,size)
 mmapFileForeignPtrLazy filepath mode offsetsize = do
+    checkModeRegion filepath mode offsetsize
     bracket (mmapFileOpen filepath mode)
             (finalizeForeignPtr) mmap
     where
