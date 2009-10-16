@@ -132,6 +132,11 @@ test_create_offset_plus_size_readwriteex = do
         bs <- BSC.unsafePackCStringLen (castPtr ptr,size) 
         bs @?= BSC.replicate 5000 '\0'
 
+test_create_readwriteex_no_way = do
+    let filename = "zonk/test_normal9.bin"
+    ignoreExceptions $ mmapWithFilePtr filename ReadWriteEx (Just (4,5000)) $ \(ptr,size) -> do
+        assertFailure "Should throw exception"
+
 test_create_nothing_readwriteex_should_throw = do
     let filename = "test_normalA.bin"
     ignoreExceptions $ removeFile filename
@@ -162,6 +167,7 @@ alltests = [ "Normal read only mmap" ~: test_normal_readonly
            , "Should ReadWriteEx mmap existing file and resize" ~: test_normal_offset_plus_size_beyond_eof_readwriteex
            , "Should ReadWriteEx mmap new file and resize" ~: test_create_offset_plus_size_readwriteex
            , "ReadWriteEx must have range specified" ~: test_create_nothing_readwriteex_should_throw
+           , "Report error in file creation" ~: test_create_readwriteex_no_way  
 
            -- insert tests above this line
            , "Counters should be zero" ~: test_counters_zero
