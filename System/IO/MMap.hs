@@ -189,7 +189,7 @@ sanitizeFileRegion filepath handle mode region = withForeignPtr handle $ \handle
 
 checkModeRegion :: FilePath -> Mode -> Maybe a -> IO ()
 checkModeRegion filepath ReadWriteEx Nothing = 
-    throw (errnoToIOError "mmap ReadWriteEx must have explicit region" eINVAL Nothing (Just filepath))
+    ioError (errnoToIOError "mmap ReadWriteEx must have explicit region" eINVAL Nothing (Just filepath))
 checkModeRegion _ _ _ = return ()
 
 -- | The 'mmapFilePtr' function maps a file or device into memory,
