@@ -105,13 +105,6 @@ void *system_io_mmap_mmap(void *handle, int mode, long long offset, size_t size)
 	return NULL;
     }
 
-    if( mode==3 ) {
-	fstat(fd,&st);
-	if( st.st_size<offset+size) {
-	    ftruncate(fd,offset+size);
-	}
-    }
-
     if( size>0 ) {
         ptr = mmap(NULL,size,prot,flags,fd,offset);
 
@@ -158,6 +151,13 @@ long long system_io_mmap_file_size(void *handle)
     fstat(fd,&st);
     return st.st_size;
 }
+
+int system_io_mmap_extend_file_size(void *handle, long long size)
+{
+    int fd = (int)(intptr_t)handle - 1;
+    return ftruncate(fd,size);
+}
+
 
 //foreign import ccall unsafe "system_io_mmap_granularity" c_system_io_granularity :: CInt
 int system_io_mmap_granularity()

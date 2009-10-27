@@ -1,4 +1,4 @@
-
+{-# LANGUAGE ForeignFunctionInterface, CPP #-}
 -- |
 -- Module      :  System.IO.MMap
 -- Copyright   :  (c) Gracjan Polak 2009
@@ -47,7 +47,7 @@ import qualified Foreign.Concurrent( newForeignPtr )
 import System.IO.Unsafe  (unsafePerformIO)
 import qualified Data.ByteString.Internal as BS (fromForeignPtr)
 import Data.Int (Int64)
-import Control.Monad  (when)
+import Control.Monad  (when,liftM)
 import Control.Exception
 import qualified Data.ByteString as BS (ByteString)
 import qualified Data.ByteString.Lazy as BSL  (ByteString,fromChunks)
@@ -167,8 +167,13 @@ data Mode = ReadOnly     -- ^ file is mapped read-only, file must
     deriving (Eq,Ord,Enum,Show,Read)
 
 sanitizeFileRegion :: (Integral a,Bounded a) => String -> ForeignPtr () -> Mode -> Maybe (Int64,a) -> IO (Int64,a)
-sanitizeFileRegion filepath handle ReadWriteEx (Just region) 
-    = return region
+sanitizeFileRegion filepath handle ReadWriteEx (Just region@(offset,length)) = 
+    withForeignPtr handle $ \handle -> do
+        longsize <- c_system_io_file_size handle
+        let needsize = fromIntegral (offset + fromIntegral length)
+        when (longsize < needsize) 
+                 ((throwErrnoIfMinus1 "extend file size" $ c_system_io_extend_file_size handle needsize) >> return ())
+        return region 
 sanitizeFileRegion filepath handle ReadWriteEx _ 
     = error "sanitizeRegion given ReadWriteEx with no region, please check earlier for this"
 sanitizeFileRegion filepath handle mode region = withForeignPtr handle $ \handle -> do
@@ -375,6 +380,10 @@ foreign import ccall unsafe "HsMmap.h system_io_mmap_munmap"
 -- | Get file size in system specific manner
 foreign import ccall unsafe "HsMmap.h system_io_mmap_file_size"
     c_system_io_file_size :: Ptr () -> IO CLLong
+-- | Set file size in system specific manner. It is guaranteed to be called
+-- only with new size being at least current size.
+foreign import ccall unsafe "HsMmap.h system_io_mmap_extend_file_size"
+    c_system_io_extend_file_size :: Ptr () -> CLLong -> IO CInt
 -- | Memory mapping granularity.
 foreign import ccall unsafe "HsMmap.h system_io_mmap_granularity"
     c_system_io_granularity :: CInt

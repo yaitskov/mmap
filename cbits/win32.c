@@ -185,6 +185,16 @@ long long system_io_mmap_file_size(void *handle)
     return (long long)lobits + ((long long)hibits << 32);
 }
 
+int system_io_mmap_extend_file_size(void *handle, long long size)
+{
+    DWORD lobits = (DWORD)size, hibits = (DWORD)(size>>32);
+    HANDLE mapping = CreateFileMapping(handle,NULL,PAGE_READWRITE,hibits,lobits,NULL);
+    if(mapping==NULL)
+        return -1;
+    CloseHandle(mapping);
+    return 0;
+}
+
 //foreign import ccall unsafe "system_io_mmap_granularity" c_system_io_granularity :: CInt
 int system_io_mmap_granularity()
 {

@@ -49,6 +49,13 @@ test_normal_readonly = do
     bs <- mmapFileByteString "test_normal.bin" Nothing
     bs @?= content
 
+test_normal_readonly_many_times = do
+    BSC.writeFile "test_normal.bin" content
+    bs1 <- mmapFileByteString "test_normal.bin" Nothing
+    bs2 <- mmapFileByteString "test_normal.bin" Nothing
+    bs3 <- mmapFileByteString "test_normal.bin" Nothing
+    BSC.concat [bs1,bs2,bs3] @?= BSC.concat [content, content, content]
+
 test_normal_readonly_lazy = do
     let filename = "test_normalQ.bin"
     BSC.writeFile filename content
@@ -142,6 +149,13 @@ test_normal_offset_plus_size_beyond_eof_readonly = do
         mmapFileByteString filename (Just (4,5000))
         assertFailure "Should throw exception"
 
+test_normal_offset_plus_size_beyond_eof_readonly_lazy = do
+    let filename = "test_normal7.bin"
+    BSC.writeFile filename content
+    ignoreExceptions $ do
+        mmapFileByteStringLazy filename (Just (4,5000))
+        assertFailure "Should throw exception"
+
 test_normal_offset_plus_size_beyond_eof_readwriteex = do
     let filename = "test_normal8.bin"
     BSC.writeFile filename content
@@ -166,6 +180,16 @@ test_readwriteex_lazy_make_a_touch = do
     let threegb = 3*1000*1000*1000
     ignore <- mmapFileForeignPtrLazy filename ReadWriteEx (Just (4,threegb))
     let size = sum (Prelude.map (\(_,_,s) -> s) ignore)
+    size @?= fromIntegral threegb
+
+test_readwriteex_lazy_make_dont_touch = do
+    let filename = "test_normal86.bin"
+    BSC.writeFile filename content
+    let threegb = 3*1000
+    mmapFileForeignPtrLazy filename ReadWriteEx (Just (0,threegb))
+    System.Mem.performGC
+    threadDelay 1000
+    size <- withFile filename ReadMode hFileSize 
     size @?= fromIntegral threegb
 
 test_create_offset_plus_size_readwriteex = do
@@ -220,10 +244,12 @@ alltests = [ "Normal read only mmap" ~:
              test_normal_offset_size_zero_readonly_lazy
            , "Should throw error if mmaping readonly beyond end of file" ~: 
              test_normal_offset_beyond_eof_readonly
-           , "Should throw error if mmaping readonly beyond end of file" ~: 
+           , "Should throw error if mmaping readonly beyond end of file lazy" ~: 
              test_normal_offset_beyond_eof_readonly_lazy
-           , "Should throw error if mmaping readonly with size beyond end of file lazy" ~: 
+           , "Should throw error if mmaping readonly with size beyond end of file" ~: 
              test_normal_offset_plus_size_beyond_eof_readonly
+           , "Should throw error if mmaping readonly with size beyond end of file lazy" ~: 
+             test_normal_offset_plus_size_beyond_eof_readonly_lazy
            , "Should ReadWriteEx mmap existing file and resize" ~: 
              test_normal_offset_plus_size_beyond_eof_readwriteex
            , "Should ReadWriteEx mmap new file and resize" ~:
@@ -232,11 +258,15 @@ alltests = [ "Normal read only mmap" ~:
              test_create_nothing_readwriteex_should_throw
            , "Report error in file creation" ~:
              test_create_readwriteex_no_way  
-           , "ReadWriteEx in lazy should extend file beyond 3GB when mapped in" ~:
-             test_readwriteex_lazy_make_a_touch 
+           , "ReadWriteEx in lazy mode should set file size even if not touching" ~:
+             test_readwriteex_lazy_make_dont_touch
            , "Remove file while mmaped" ~:
              test_delete_while_mmapped 
+           , "MMap byte string many times" ~:
+             test_normal_readonly_many_times
 
+           , "ReadWriteEx in lazy should extend file beyond 3GB when mapped in" ~:
+             test_readwriteex_lazy_make_a_touch 
            -- insert tests above this line
            , "Counters should be zero" ~:
              test_counters_zero
@@ -273,3 +303,4 @@ main = do
     threadDelay 10000
 
 -}
+
