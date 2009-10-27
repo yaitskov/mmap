@@ -40,12 +40,14 @@ Executable mmaptest
   else
       Buildable: False
   Build-depends: base<5, bytestring, HUnit, directory
-  Extensions: ForeignFunctionInterface, ScopedTypeVariables
+  Extensions: ForeignFunctionInterface, ScopedTypeVariables, CPP
   Hs-source-dirs: .
   CC-options: -Wall -D_DEBUG
   Include-dirs: cbits
   if os(mingw32)
+      cpp-options: -DWINDOWS
       C-sources: cbits/win32.c
+      Build-depends: Win32
   else
       C-sources: cbits/posix.c
 

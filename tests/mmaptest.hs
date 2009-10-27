@@ -1,4 +1,4 @@
-{-# LANGUAGE ForeignFunctionInterface #-}
+{-# LANGUAGE ForeignFunctionInterface, CPP #-}
 
 module Main where
 
@@ -17,32 +17,29 @@ import System.Directory
 import Foreign.C.Types (CInt,CLLong)
 import Control.Monad
 import System.IO
-
-{-
-
-Things to test:
-
-1. Opening an existing file.
-2. Opening non exisitng file.
-3. Opening a file we don't have rights to.
-4. Opening read only file for writting.
-5. Opening zero lenght file read only
-6. Opening zero lenght file read write
-7. Extending file size.
-8. MMaping only part of file.
-9. MMaping negative offset.
-10. Mmaping beyond end of file without extending
-11. Mmaping 3GB file.
-12. Mmaping 5GB file under 32bit (fail)
-13. Mmaping 5GB file under 32bit (success)
-
--}
+#ifdef WINDOWS
+import qualified System.Win32.File as W
+#endif
 
 ignoreExceptions doit = (doit >> return ()) `catch` (\e -> return ())
 
 foreign import ccall unsafe "HsMmap.h system_io_mmap_counters"
     c_system_io_counters :: IO CInt
 
+removeFileDelayed :: FilePath -> IO ()
+#ifdef WINDOWS
+removeFileDelayed filepath = do
+  h <- W.createFile filepath
+                    W.dELETE
+                    W.fILE_SHARE_NONE
+                    Nothing
+                    W.oPEN_ALWAYS
+                    W.fILE_FLAG_DELETE_ON_CLOSE
+                    Nothing
+  W.closeHandle h
+#else
+removeFileDelayed filepath = removeFile filepath
+#endif
 
 content = BSC.pack "Memory mapping of files for POSIX and Windows"
 contentLazy = BSL.fromChunks [content]
@@ -153,6 +150,16 @@ test_normal_offset_plus_size_beyond_eof_readwriteex = do
         bs <- BSC.unsafePackCStringLen (castPtr ptr,size) 
         bs @?= BSC.take 5000 (BSC.drop 4 (content `BSC.append` BSC.replicate 10000 '\0'))
 
+test_delete_while_mmapped = do
+    let filename = "test_normalU.bin"
+    BSC.writeFile filename content
+    mmapWithFilePtr filename ReadOnly Nothing $ \(ptr,size) -> do
+        removeFileDelayed filename
+        bs <- BSC.unsafePackCStringLen (castPtr ptr,size) 
+        bs @?= content
+    v <- doesFileExist filename
+    False @=? v
+
 test_readwriteex_lazy_make_a_touch = do
     let filename = "test_normal8.bin"
     BSC.writeFile filename content
@@ -227,6 +234,8 @@ alltests = [ "Normal read only mmap" ~:
              test_create_readwriteex_no_way  
            , "ReadWriteEx in lazy should extend file beyond 3GB when mapped in" ~:
              test_readwriteex_lazy_make_a_touch 
+           , "Remove file while mmaped" ~:
+             test_delete_while_mmapped 
 
            -- insert tests above this line
            , "Counters should be zero" ~:
