@@ -52,6 +52,8 @@ import Control.Exception
 import qualified Data.ByteString as BS (ByteString)
 import qualified Data.ByteString.Lazy as BSL  (ByteString,fromChunks)
 
+import Debug.Trace
+
 -- TODO:
 --    - support native characters (Unicode) in FilePath
 --    - support externally given HANDLEs and FDs
@@ -162,7 +164,7 @@ data Mode = ReadOnly     -- ^ file is mapped read-only, file must
                          -- permissions, region parameter specifies
                          -- size, if file size is lower it will be
                          -- extended with zeros
-    deriving (Eq,Ord,Enum)
+    deriving (Eq,Ord,Enum,Show,Read)
 
 sanitizeFileRegion :: (Integral a,Bounded a) => String -> ForeignPtr () -> Mode -> Maybe (Int64,a) -> IO (Int64,a)
 sanitizeFileRegion filepath handle ReadWriteEx (Just region) 
@@ -223,9 +225,9 @@ mmapFilePtr filepath mode offsetsize = do
     where
         mmap handle = do
             (offset,size) <- sanitizeFileRegion filepath handle mode offsetsize
-            let align = offset `mod` fromIntegral c_system_io_granularity
+            let align     = offset `mod` fromIntegral c_system_io_granularity
             let offsetraw = offset - align
-            let sizeraw = size + fromIntegral align
+            let sizeraw   = size + fromIntegral align
             ptr <- withForeignPtr handle $ \handle ->
                    c_system_io_mmap_mmap handle (fromIntegral $ fromEnum mode) 
                                              (fromIntegral offsetraw) (fromIntegral sizeraw)
@@ -282,21 +284,23 @@ mmapFileForeignPtrLazy :: FilePath                    -- ^ name of file to mmap
                        -> IO [(ForeignPtr a,Int,Int)] -- ^ (ptr,offset,size)
 mmapFileForeignPtrLazy filepath mode offsetsize = do
     checkModeRegion filepath mode offsetsize
-    bracket (mmapFileOpen filepath mode)
-            (finalizeForeignPtr) mmap
+    bracketOnError (mmapFileOpen filepath mode)
+                       (finalizeForeignPtr) mmap
     where
         mmap handle = do
             (offset,size) <- sanitizeFileRegion filepath handle mode offsetsize
             return $ map (mapChunk handle) (chunks offset size)
+        -- FIXME: might be we need NOINLINE pragma here, investigate later
         mapChunk handle (offset,size) = unsafePerformIO $
             withForeignPtr handle $ \handle -> do
-                let align = offset `mod` fromIntegral c_system_io_granularity
+                let align     = offset `mod` fromIntegral c_system_io_granularity
                     offsetraw = offset - align
-                    sizeraw = size + fromIntegral align
+                    sizeraw   = size + fromIntegral align
                 ptr <- c_system_io_mmap_mmap handle (fromIntegral $ fromEnum mode) 
                        (fromIntegral offsetraw) (fromIntegral sizeraw)
                 when (ptr == nullPtr) $
-                     throwErrno $ "mmap of '" ++ filepath ++ "' failed"
+                     throwErrno $ "lazy mmap of '" ++ filepath ++ 
+                                    "' chunk(" ++ show offset ++ "," ++ show size ++") failed"
                 let rawsizeptr = castIntToPtr sizeraw
                 foreignptr <- newForeignPtrEnv c_system_io_mmap_munmap_funptr rawsizeptr ptr
                 return (foreignptr,fromIntegral offset,size)
@@ -305,7 +309,7 @@ chunks :: Int64 -> Int64 -> [(Int64,Int)]
 chunks offset 0 = []
 chunks offset size | size <= fromIntegral chunkSize = [(offset,fromIntegral size)]
                    | otherwise = let offset2 = ((offset + chunkSize + chunkSize - 1) `div` chunkSize) * chunkSize
-                                     size2 = offset2 - offset
+                                     size2   = offset2 - offset
                                  in (offset,fromIntegral size2) : chunks offset2 (size-size2)
 
 -- | Maps region of file and returns it as 'BSL.ByteString'. File is
