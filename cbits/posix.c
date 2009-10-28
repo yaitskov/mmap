@@ -82,7 +82,6 @@ void *system_io_mmap_mmap(void *handle, int mode, long long offset, size_t size)
     int prot;
     int flags;
     int fd = (int)(intptr_t)handle - 1;
-    struct stat st;
 
     switch(mode) {
     case 0:

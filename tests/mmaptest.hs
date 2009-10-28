@@ -162,7 +162,7 @@ test_normal_offset_plus_size_beyond_eof_readwriteex = do
     BSC.writeFile filename content
     mmapWithFilePtr filename ReadWriteEx (Just (4,5000)) $ \(ptr,size) -> do
         size @?= 5000
-        bs <- BSC.unsafePackCStringLen (castPtr ptr,size) 
+        bs <- BSC.packCStringLen (castPtr ptr,size) 
         bs @?= BSC.take 5000 (BSC.drop 4 (content `BSC.append` BSC.replicate 10000 '\0'))
 
 test_delete_while_mmapped = do
@@ -170,7 +170,7 @@ test_delete_while_mmapped = do
     BSC.writeFile filename content
     mmapWithFilePtr filename ReadOnly Nothing $ \(ptr,size) -> do
         removeFileDelayed filename
-        bs <- BSC.unsafePackCStringLen (castPtr ptr,size) 
+        bs <- BSC.packCStringLen (castPtr ptr,size) 
         bs @?= content
     v <- doesFileExist filename
     False @=? v
@@ -198,7 +198,7 @@ test_create_offset_plus_size_readwriteex = do
     ignoreExceptions $ removeFile filename
     mmapWithFilePtr filename ReadWriteEx (Just (4,5000)) $ \(ptr,size) -> do
         size @?= 5000
-        bs <- BSC.unsafePackCStringLen (castPtr ptr,size) 
+        bs <- BSC.packCStringLen (castPtr ptr,size) 
         bs @?= BSC.replicate 5000 '\0'
 
 test_create_readwriteex_no_way = do
@@ -211,7 +211,7 @@ test_create_nothing_readwriteex_should_throw = do
     ignoreExceptions $ removeFile filename
     ignoreExceptions $ mmapWithFilePtr filename ReadWriteEx Nothing $ \(ptr,size) -> do
         size @?= 5000
-        bs <- BSC.unsafePackCStringLen (castPtr ptr,size)
+        bs <- BSC.packCStringLen (castPtr ptr,size)
         bs @?= BSC.replicate 5000 '\0'
         assertFailure "Should throw exception"
     x <- doesFileExist filename
@@ -222,15 +222,22 @@ test_change_two_places = do
     BSC.writeFile filename content
     mmapWithFilePtr filename ReadWrite Nothing $ \(ptr1,size1) -> 
         do
+          -- this should change one common memory
+          let v1 = 0x41414141::Int32
+          poke (castPtr ptr1) v1
+          v2 <- peek (castPtr ptr1)
+          v2 @?= v1
           bs2 <- mmapFileByteString filename Nothing
           size1 @?= BSC.length bs2
-          -- this should change one common memory
-          poke (castPtr ptr1) (0x41414141::Int32)
-          bs1 <- BSC.unsafePackCStringLen (castPtr ptr1,size1)                
+          bs1 <- BSC.packCStringLen (castPtr ptr1,size1)                
           bs1 @?= bs2
-    System.Mem.performGC
-    threadDelay 1000
-    -- change should be reflected in file on disk
+
+test_change_read_write = do
+    let filename = "test_normalA.bin"
+    BSC.writeFile filename content
+    mmapWithFilePtr filename ReadWrite Nothing $ \(ptr1,size1) -> 
+        do
+          poke (castPtr ptr1) (0x41414141::Int32)
     bs3 <- BSC.readFile filename
     bs3 @?= BSC.pack "\x41\x41\x41\x41" `BSC.append` BSC.drop 4 content
 
@@ -294,11 +301,13 @@ alltests = [ "Normal read only mmap" ~:
              test_normal_readonly_many_times
            , "Mmap common memory" ~:
              test_change_two_places
+           , "Mmap read write memory" ~:
+             test_change_read_write
            , "Mmap WriteCopy mode" ~:
              test_writecopy
 
            --, "ReadWriteEx in lazy should extend file beyond 3GB when mapped in" ~:
-           --  test_readwriteex_lazy_make_a_touch 
+           --  Test_readwriteex_lazy_make_a_touch 
            -- insert tests above this line
            , "Counters should be zero" ~:
              test_counters_zero
@@ -324,7 +333,7 @@ main = do
     E.catch (do
               bs3 <- mmapFileByteString "test.bin" Nothing
               print (fromIntegral l==BSC.length bs3 + 5 ))
-          (\e -> print True -- exception here is also ok
+          (\E -> print True -- exception here is also ok
           )
     bs4 <- mmapFileByteStringLazy "test.bin" Nothing
     print (BSL.fromChunks [content] == BSL.take (fromIntegral $ BSC.length content) bs4)
