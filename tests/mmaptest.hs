@@ -218,7 +218,7 @@ test_create_nothing_readwriteex_should_throw = do
     x @?= False
 
 test_change_two_places = do
-    let filename = "test_normalA.bin"
+    let filename = "test_normalAB.bin"
     BSC.writeFile filename content
     mmapWithFilePtr filename ReadWrite Nothing $ \(ptr1,size1) -> 
         do
@@ -233,7 +233,7 @@ test_change_two_places = do
           bs1 @?= bs2
 
 test_change_read_write = do
-    let filename = "test_normalA.bin"
+    let filename = "test_normalAC.bin"
     BSC.writeFile filename content
     mmapWithFilePtr filename ReadWrite Nothing $ \(ptr1,size1) -> 
         do
@@ -242,7 +242,7 @@ test_change_read_write = do
     bs3 @?= BSC.pack "\x41\x41\x41\x41" `BSC.append` BSC.drop 4 content
 
 test_writecopy = do
-    let filename = "test_normalA.bin"
+    let filename = "test_normalAD.bin"
     BSC.writeFile filename content
     mmapWithFilePtr filename WriteCopy Nothing $ \(ptr1,size1) -> 
         do
