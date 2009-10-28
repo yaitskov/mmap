@@ -17,6 +17,7 @@ import System.Directory
 import Foreign.C.Types (CInt,CLLong)
 import Control.Monad
 import System.IO
+import Data.Int
 #ifdef WINDOWS
 import qualified System.Win32.File as W
 #endif
@@ -216,6 +217,33 @@ test_create_nothing_readwriteex_should_throw = do
     x <- doesFileExist filename
     x @?= False
 
+test_change_two_places = do
+    let filename = "test_normalA.bin"
+    BSC.writeFile filename content
+    mmapWithFilePtr filename ReadWrite Nothing $ \(ptr1,size1) -> 
+        do
+          bs2 <- mmapFileByteString filename Nothing
+          size1 @?= BSC.length bs2
+          -- this should change one common memory
+          poke (castPtr ptr1) (0x41414141::Int32)
+          bs1 <- BSC.unsafePackCStringLen (castPtr ptr1,size1)                
+          bs1 @?= bs2
+    System.Mem.performGC
+    threadDelay 1000
+    -- change should be reflected in file on disk
+    bs3 <- BSC.readFile filename
+    bs3 @?= BSC.pack "\x41\x41\x41\x41" `BSC.append` BSC.drop 4 content
+
+test_writecopy = do
+    let filename = "test_normalA.bin"
+    BSC.writeFile filename content
+    mmapWithFilePtr filename WriteCopy Nothing $ \(ptr1,size1) -> 
+        do
+          poke (castPtr ptr1) (0x41414141::Int32)
+    -- change should NOT be reflected in file on disk
+    bs3 <- BSC.readFile filename
+    bs3 @?= content
+
 test_counters_zero = do
     System.Mem.performGC
     threadDelay 1000
@@ -264,9 +292,13 @@ alltests = [ "Normal read only mmap" ~:
              test_delete_while_mmapped 
            , "MMap byte string many times" ~:
              test_normal_readonly_many_times
+           , "Mmap common memory" ~:
+             test_change_two_places
+           , "Mmap WriteCopy mode" ~:
+             test_writecopy
 
-           , "ReadWriteEx in lazy should extend file beyond 3GB when mapped in" ~:
-             test_readwriteex_lazy_make_a_touch 
+           --, "ReadWriteEx in lazy should extend file beyond 3GB when mapped in" ~:
+           --  test_readwriteex_lazy_make_a_touch 
            -- insert tests above this line
            , "Counters should be zero" ~:
              test_counters_zero
