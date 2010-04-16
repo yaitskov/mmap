@@ -73,7 +73,7 @@ import Debug.Trace
 -- user. Otherwise referential transparency may be or may be not
 -- compromised. Sadly semantics differ much between operating systems.
 --
--- In case of IO errors all function use 'throwErrno'.
+-- In case of IO errors all function use 'throwErrno' or 'throwErrnoPath'.
 --
 -- In case of 'ForeignPtr' or 'BS.ByteString' functions the storage
 -- manager is used to free the mapped memory. When the garbage
@@ -172,7 +172,8 @@ sanitizeFileRegion filepath handle ReadWriteEx (Just region@(offset,length)) =
         longsize <- c_system_io_file_size handle
         let needsize = fromIntegral (offset + fromIntegral length)
         when (longsize < needsize) 
-                 ((throwErrnoIfMinus1 "extend file size" $ c_system_io_extend_file_size handle needsize) >> return ())
+                 ((throwErrnoPathIfMinus1 "extend file size" filepath $ 
+                   c_system_io_extend_file_size handle needsize) >> return ())
         return region 
 sanitizeFileRegion filepath handle ReadWriteEx _ 
     = error "sanitizeRegion given ReadWriteEx with no region, please check earlier for this"
@@ -182,15 +183,15 @@ sanitizeFileRegion filepath handle mode region = withForeignPtr handle $ \handle
     (offset,size) <- case region of
         Just (offset,size) -> do
             when (size<0) $
-                 throwErrno $ "mmap of '" ++ filepath ++ "' failed, negative size reguested"
+                 ioError (errnoToIOError "mmap negative size reguested" eINVAL Nothing (Just filepath))
             when (offset<0) $
-                 throwErrno $ "mmap of '" ++ filepath ++ "' failed, negative offset reguested"
+                 ioError (errnoToIOError "mmap negative offset reguested" eINVAL Nothing (Just filepath))
             when (mode/=ReadWriteEx && (longsize<offset || longsize<(offset + fromIntegral size))) $
-                 throwErrno $ "mmap of '" ++ filepath ++ "' failed, offset and size beyond end of file"
+                 ioError (errnoToIOError "mmap offset and size beyond end of file" eINVAL Nothing (Just filepath))
             return (offset,size)
         Nothing -> do
             when (longsize > fromIntegral (maxBound `asTypeOf` sizetype)) $
-                 throwErrno $ "mmap of '" ++ filepath ++ "' failed, size is greater then maxBound"
+                 ioError (errnoToIOError "mmap requested size is greater then maxBound" eINVAL Nothing (Just filepath))
             return (0,fromIntegral longsize)
     return (offset,size)
 
@@ -237,7 +238,7 @@ mmapFilePtr filepath mode offsetsize = do
                    c_system_io_mmap_mmap handle (fromIntegral $ fromEnum mode) 
                                              (fromIntegral offsetraw) (fromIntegral sizeraw)
             when (ptr == nullPtr) $
-                  throwErrno $ "mmap of '" ++ filepath ++ "' failed"
+                  throwErrnoPath ("mmap of '" ++ filepath ++ "' failed") filepath
             return (castPtr ptr,sizeraw,fromIntegral align,size)
 
 -- | Memory map region of file using autounmap semantics. See
@@ -304,8 +305,8 @@ mmapFileForeignPtrLazy filepath mode offsetsize = do
                 ptr <- c_system_io_mmap_mmap handle (fromIntegral $ fromEnum mode) 
                        (fromIntegral offsetraw) (fromIntegral sizeraw)
                 when (ptr == nullPtr) $
-                     throwErrno $ "lazy mmap of '" ++ filepath ++ 
-                                    "' chunk(" ++ show offset ++ "," ++ show size ++") failed"
+                     throwErrnoPath ("lazy mmap of '" ++ filepath ++ 
+                                    "' chunk(" ++ show offset ++ "," ++ show size ++") failed") filepath
                 let rawsizeptr = castIntToPtr sizeraw
                 foreignptr <- newForeignPtrEnv c_system_io_mmap_munmap_funptr rawsizeptr ptr
                 return (foreignptr,fromIntegral offset,size)
@@ -344,7 +345,7 @@ mmapFileOpen filepath mode = do
     ptr <- withCString filepath $ \filepath ->
         c_system_io_mmap_file_open filepath (fromIntegral $ fromEnum mode)
     when (ptr == nullPtr) $
-        throwErrno $ "opening of '" ++ filepath ++ "' failed"
+        throwErrnoPath ("opening of '" ++ filepath ++ "' failed") filepath
     handle <- newForeignPtr c_system_io_mmap_file_close ptr
     return handle
 
@@ -353,6 +354,7 @@ castPtrToInt ptr = ptr `minusPtr` nullPtr
 
 castIntToPtr :: Int -> Ptr a
 castIntToPtr int = nullPtr `plusPtr` int
+
 
 -- | Should open file given as CString in mode given as CInt
 foreign import ccall unsafe "HsMmap.h system_io_mmap_file_open"
