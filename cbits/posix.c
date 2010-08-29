@@ -3,6 +3,7 @@
 #define _LARGEFILE64_SOURCE 1
 #define _FILE_OFFSET_BITS 64
 
+#include <stdint.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
