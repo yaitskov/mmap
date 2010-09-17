@@ -37,9 +37,9 @@ Executable mmaptest
   Main-is: tests/mmaptest.hs
   if flag(mmaptest)
       Buildable: True
+      Build-depends: base<5, bytestring, HUnit, directory
   else
       Buildable: False
-  Build-depends: base<5, bytestring, HUnit, directory
   Extensions: ForeignFunctionInterface, ScopedTypeVariables, CPP
   Hs-source-dirs: .
   CC-options: -Wall -D_DEBUG
