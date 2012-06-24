@@ -1,9 +1,9 @@
 Name: mmap
-Version: 0.5.7
-Stability: alpha
+Version: 0.5.8
+Stability: stable
 License: BSD3
 License-File: LICENSE
-Copyright: 2008, Gracjan Polak
+Copyright: 2008-2012, Gracjan Polak
 Author: Gracjan Polak <gracjanpolak@gmail.com>
 Maintainer: Gracjan Polak <gracjanpolak@gmail.com>
 Synopsis: Memory mapped files for POSIX and Windows
@@ -21,6 +21,10 @@ Extra-Source-Files: cbits/HsMmap.h
 Flag mmaptest
   Description: Generate mmaptest executable
   Default: False
+
+Source-repository head
+  Type:     darcs
+  Location: http://code.haskell.org/mmap
 
 Library
   Build-depends: base<5, bytestring
@@ -50,4 +54,3 @@ Executable mmaptest
       Build-depends: Win32
   else
       C-sources: cbits/posix.c
-
