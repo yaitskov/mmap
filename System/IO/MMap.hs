@@ -37,8 +37,8 @@ where
 
 import System.IO ()
 import Foreign.Ptr (Ptr,FunPtr,nullPtr,plusPtr,minusPtr,castPtr)
-import Foreign.C.Types (CInt,CLLong,CSize)
-import Foreign.C.String (CString,withCString)
+import Foreign.C.Types (CInt(..),CLLong(..),CSize(..))
+import Foreign.C.String (CString(..),withCString)
 import Foreign.ForeignPtr (ForeignPtr,withForeignPtr,finalizeForeignPtr,newForeignPtr,newForeignPtrEnv,newForeignPtr_)
 import Foreign.Storable( poke )
 import Foreign.Marshal.Alloc( malloc, mallocBytes, free )
