@@ -14,15 +14,16 @@ import System.Mem
 import Control.Concurrent
 import Test.HUnit
 import System.Directory
-import Foreign.C.Types (CInt,CLLong)
+import Foreign.C.Types (CInt(..),CLLong)
 import Control.Monad
 import System.IO
 import Data.Int
+import Control.Exception as E
 #ifdef WINDOWS
 import qualified System.Win32.File as W
 #endif
 
-ignoreExceptions doit = (doit >> return ()) `catch` (\e -> return ())
+ignoreExceptions doit = (doit >> return ()) `E.catch` (\(e :: IOError) -> return ())
 
 foreign import ccall unsafe "HsMmap.h system_io_mmap_counters"
     c_system_io_counters :: IO CInt
@@ -76,18 +77,15 @@ test_non_existing_readonly = do
 
 test_no_permission_readonly = do
     let filename = "test_nopermission.bin"
-    ignoreExceptions $ setPermissions filename (Permissions {readable = True, 
-                                                             writable = True, 
-                                                             executable = True, 
-                                                             searchable = True})
+    ignoreExceptions $ setPermissions filename (setOwnerReadable True .
+                                                setOwnerWritable True .
+                                                setOwnerExecutable True .
+                                                setOwnerSearchable True $ emptyPermissions)
     BSC.writeFile filename content
-    setPermissions filename (Permissions {readable = False, 
-                                          writable = False, 
-                                          executable = False, 
-                                          searchable = False})
-    Permissions {readable = readable} <- getPermissions filename
-          -- no way to clear read flag under Windows, skip the test
-    if not readable
+    setPermissions filename (emptyPermissions)
+    permissions <- getPermissions filename
+    -- no way to clear read flag under Windows, skip the test
+    if not (readable permissions)
         then ignoreExceptions $ do
                  mmapFileByteString filename Nothing
                  assertFailure "Should throw exception"
@@ -162,7 +160,7 @@ test_normal_offset_plus_size_beyond_eof_readwriteex = do
     BSC.writeFile filename content
     mmapWithFilePtr filename ReadWriteEx (Just (4,5000)) $ \(ptr,size) -> do
         size @?= 5000
-        bs <- BSC.packCStringLen (castPtr ptr,size) 
+        bs <- BSC.packCStringLen (castPtr ptr,size)
         bs @?= BSC.take 5000 (BSC.drop 4 (content `BSC.append` BSC.replicate 10000 '\0'))
 
 test_delete_while_mmapped = do
@@ -170,7 +168,7 @@ test_delete_while_mmapped = do
     BSC.writeFile filename content
     mmapWithFilePtr filename ReadOnly Nothing $ \(ptr,size) -> do
         removeFileDelayed filename
-        bs <- BSC.packCStringLen (castPtr ptr,size) 
+        bs <- BSC.packCStringLen (castPtr ptr,size)
         bs @?= content
     v <- doesFileExist filename
     False @=? v
@@ -190,7 +188,7 @@ test_readwriteex_lazy_make_dont_touch = do
     mmapFileForeignPtrLazy filename ReadWriteEx (Just (0,threegb))
     System.Mem.performGC
     threadDelay 1000
-    size <- withFile filename ReadMode hFileSize 
+    size <- withFile filename ReadMode hFileSize
     size @?= fromIntegral threegb
 
 test_create_offset_plus_size_readwriteex = do
@@ -198,7 +196,7 @@ test_create_offset_plus_size_readwriteex = do
     ignoreExceptions $ removeFile filename
     mmapWithFilePtr filename ReadWriteEx (Just (4,5000)) $ \(ptr,size) -> do
         size @?= 5000
-        bs <- BSC.packCStringLen (castPtr ptr,size) 
+        bs <- BSC.packCStringLen (castPtr ptr,size)
         bs @?= BSC.replicate 5000 '\0'
 
 test_create_readwriteex_no_way = do
@@ -220,7 +218,7 @@ test_create_nothing_readwriteex_should_throw = do
 test_change_two_places = do
     let filename = "test_normalAB.bin"
     BSC.writeFile filename content
-    mmapWithFilePtr filename ReadWrite Nothing $ \(ptr1,size1) -> 
+    mmapWithFilePtr filename ReadWrite Nothing $ \(ptr1,size1) ->
         do
           -- this should change one common memory
           let v1 = 0x41414141::Int32
@@ -229,13 +227,13 @@ test_change_two_places = do
           v2 @?= v1
           bs2 <- mmapFileByteString filename Nothing
           size1 @?= BSC.length bs2
-          bs1 <- BSC.packCStringLen (castPtr ptr1,size1)                
+          bs1 <- BSC.packCStringLen (castPtr ptr1,size1)
           bs1 @?= bs2
 
 test_change_read_write = do
     let filename = "test_normalAC.bin"
     BSC.writeFile filename content
-    mmapWithFilePtr filename ReadWrite Nothing $ \(ptr1,size1) -> 
+    mmapWithFilePtr filename ReadWrite Nothing $ \(ptr1,size1) ->
         do
           poke (castPtr ptr1) (0x41414141::Int32)
     bs3 <- BSC.readFile filename
@@ -244,7 +242,7 @@ test_change_read_write = do
 test_writecopy = do
     let filename = "test_normalAD.bin"
     BSC.writeFile filename content
-    mmapWithFilePtr filename WriteCopy Nothing $ \(ptr1,size1) -> 
+    mmapWithFilePtr filename WriteCopy Nothing $ \(ptr1,size1) ->
         do
           poke (castPtr ptr1) (0x41414141::Int32)
     -- change should NOT be reflected in file on disk
@@ -257,46 +255,46 @@ test_counters_zero = do
     counters <- c_system_io_counters
     return (counters @?= 0)
 
-alltests = [ "Normal read only mmap" ~: 
+alltests = [ "Normal read only mmap" ~:
              test_normal_readonly
-           , "Normal read only mmap lazy" ~: 
+           , "Normal read only mmap lazy" ~:
              test_normal_readonly_lazy
-           , "Zero length file mmap" ~: 
+           , "Zero length file mmap" ~:
              test_normal_readonly_zero_length
-           , "File does not exist" ~: 
+           , "File does not exist" ~:
              test_non_existing_readonly
-           , "No permission to read file" ~: 
+           , "No permission to read file" ~:
              test_no_permission_readonly
-           , "Signal error when negative offset given" ~: 
+           , "Signal error when negative offset given" ~:
              test_normal_negative_offset_readonly
            , "Signal error when negative size given" ~:
              test_normal_negative_size_readonly
-           , "Test if we can cut part of file" ~: 
+           , "Test if we can cut part of file" ~:
              test_normal_offset_size_readonly
-           , "Test if we can cut zero length part of file" ~: 
+           , "Test if we can cut zero length part of file" ~:
              test_normal_offset_size_zero_readonly
-           , "Test if we can cut zero length part of file lazy" ~: 
+           , "Test if we can cut zero length part of file lazy" ~:
              test_normal_offset_size_zero_readonly_lazy
-           , "Should throw error if mmaping readonly beyond end of file" ~: 
+           , "Should throw error if mmaping readonly beyond end of file" ~:
              test_normal_offset_beyond_eof_readonly
-           , "Should throw error if mmaping readonly beyond end of file lazy" ~: 
+           , "Should throw error if mmaping readonly beyond end of file lazy" ~:
              test_normal_offset_beyond_eof_readonly_lazy
-           , "Should throw error if mmaping readonly with size beyond end of file" ~: 
+           , "Should throw error if mmaping readonly with size beyond end of file" ~:
              test_normal_offset_plus_size_beyond_eof_readonly
-           , "Should throw error if mmaping readonly with size beyond end of file lazy" ~: 
+           , "Should throw error if mmaping readonly with size beyond end of file lazy" ~:
              test_normal_offset_plus_size_beyond_eof_readonly_lazy
-           , "Should ReadWriteEx mmap existing file and resize" ~: 
+           , "Should ReadWriteEx mmap existing file and resize" ~:
              test_normal_offset_plus_size_beyond_eof_readwriteex
            , "Should ReadWriteEx mmap new file and resize" ~:
              test_create_offset_plus_size_readwriteex
            , "ReadWriteEx must have range specified" ~:
              test_create_nothing_readwriteex_should_throw
            , "Report error in file creation" ~:
-             test_create_readwriteex_no_way  
+             test_create_readwriteex_no_way
            , "ReadWriteEx in lazy mode should set file size even if not touching" ~:
              test_readwriteex_lazy_make_dont_touch
            , "Remove file while mmaped" ~:
-             test_delete_while_mmapped 
+             test_delete_while_mmapped
            , "MMap byte string many times" ~:
              test_normal_readonly_many_times
            , "Mmap common memory" ~:
@@ -307,7 +305,7 @@ alltests = [ "Normal read only mmap" ~:
              test_writecopy
 
            --, "ReadWriteEx in lazy should extend file beyond 3GB when mapped in" ~:
-           --  Test_readwriteex_lazy_make_a_touch 
+           --  Test_readwriteex_lazy_make_a_touch
            -- insert tests above this line
            , "Counters should be zero" ~:
              test_counters_zero
@@ -344,4 +342,3 @@ main = do
     threadDelay 10000
 
 -}
-
