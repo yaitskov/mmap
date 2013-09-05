@@ -2,8 +2,8 @@
 -- |
 -- Module      :  System.IO.MMap
 -- Copyright   :  (c) Gracjan Polak 2009
--- License     :  BSD-style 
--- 
+-- License     :  BSD-style
+--
 -- Stability   :  experimental
 -- Portability :  portable
 --
@@ -36,23 +36,21 @@ module System.IO.MMap
 where
 
 import System.IO ()
-import Foreign.Ptr (Ptr,FunPtr,nullPtr,plusPtr,minusPtr,castPtr)
+import Foreign.Ptr (Ptr,FunPtr,nullPtr,plusPtr,castPtr)
 import Foreign.C.Types (CInt(..),CLLong(..),CSize(..))
-import Foreign.C.String (CString(..),withCString)
-import Foreign.ForeignPtr (ForeignPtr,withForeignPtr,finalizeForeignPtr,newForeignPtr,newForeignPtrEnv,newForeignPtr_)
-import Foreign.Storable( poke )
-import Foreign.Marshal.Alloc( malloc, mallocBytes, free )
+import Foreign.C.String (CString,withCString)
+import Foreign.ForeignPtr (ForeignPtr,withForeignPtr,finalizeForeignPtr,newForeignPtr,newForeignPtrEnv)
 import Foreign.C.Error
-import qualified Foreign.Concurrent( newForeignPtr )
 import System.IO.Unsafe  (unsafePerformIO)
 import qualified Data.ByteString.Internal as BS (fromForeignPtr)
 import Data.Int (Int64)
-import Control.Monad  (when,liftM)
-import Control.Exception
+import Control.Monad  (when)
+import qualified Control.Exception as E (bracketOnError, bracket, finally)
 import qualified Data.ByteString as BS (ByteString)
 import qualified Data.ByteString.Lazy as BSL  (ByteString,fromChunks)
+import Prelude hiding (length)
 
-import Debug.Trace
+--import Debug.Trace
 
 -- TODO:
 --    - support native characters (Unicode) in FilePath
@@ -167,17 +165,17 @@ data Mode = ReadOnly     -- ^ file is mapped read-only, file must
     deriving (Eq,Ord,Enum,Show,Read)
 
 sanitizeFileRegion :: (Integral a,Bounded a) => String -> ForeignPtr () -> Mode -> Maybe (Int64,a) -> IO (Int64,a)
-sanitizeFileRegion filepath handle ReadWriteEx (Just region@(offset,length)) = 
-    withForeignPtr handle $ \handle -> do
+sanitizeFileRegion filepath handle' ReadWriteEx (Just region@(offset,length)) =
+    withForeignPtr handle' $ \handle -> do
         longsize <- c_system_io_file_size handle
         let needsize = fromIntegral (offset + fromIntegral length)
-        when (longsize < needsize) 
-                 ((throwErrnoPathIfMinus1 "extend file size" filepath $ 
+        when (longsize < needsize)
+                 ((throwErrnoPathIfMinus1 "extend file size" filepath $
                    c_system_io_extend_file_size handle needsize) >> return ())
-        return region 
-sanitizeFileRegion filepath handle ReadWriteEx _ 
+        return region
+sanitizeFileRegion _filepath _handle ReadWriteEx _
     = error "sanitizeRegion given ReadWriteEx with no region, please check earlier for this"
-sanitizeFileRegion filepath handle mode region = withForeignPtr handle $ \handle -> do
+sanitizeFileRegion filepath handle' mode region = withForeignPtr handle' $ \handle -> do
     longsize <- c_system_io_file_size handle >>= \x -> return (fromIntegral x)
     let Just (_,sizetype) = region
     (offset,size) <- case region of
@@ -196,7 +194,7 @@ sanitizeFileRegion filepath handle mode region = withForeignPtr handle $ \handle
     return (offset,size)
 
 checkModeRegion :: FilePath -> Mode -> Maybe a -> IO ()
-checkModeRegion filepath ReadWriteEx Nothing = 
+checkModeRegion filepath ReadWriteEx Nothing =
     ioError (errnoToIOError "mmap ReadWriteEx must have explicit region" eINVAL Nothing (Just filepath))
 checkModeRegion _ _ _ = return ()
 
@@ -216,7 +214,7 @@ checkModeRegion _ _ _ = return ()
 --
 -- Use @munmapFilePtr ptr rawsize@ to unmap memory.
 --
--- Memory mapped files will behave as if they were read lazily 
+-- Memory mapped files will behave as if they were read lazily
 -- pages from the file will be loaded into memory on demand.
 --
 
@@ -226,16 +224,16 @@ mmapFilePtr :: FilePath                     -- ^ name of file to mmap
             -> IO (Ptr a,Int,Int,Int)       -- ^ (ptr,rawsize,offset,size)
 mmapFilePtr filepath mode offsetsize = do
     checkModeRegion filepath mode offsetsize
-    bracket (mmapFileOpen filepath mode)
+    E.bracket (mmapFileOpen filepath mode)
             (finalizeForeignPtr) mmap
     where
-        mmap handle = do
-            (offset,size) <- sanitizeFileRegion filepath handle mode offsetsize
+        mmap handle' = do
+            (offset,size) <- sanitizeFileRegion filepath handle' mode offsetsize
             let align     = offset `mod` fromIntegral c_system_io_granularity
             let offsetraw = offset - align
             let sizeraw   = size + fromIntegral align
-            ptr <- withForeignPtr handle $ \handle ->
-                   c_system_io_mmap_mmap handle (fromIntegral $ fromEnum mode) 
+            ptr <- withForeignPtr handle' $ \handle ->
+                   c_system_io_mmap_mmap handle (fromIntegral $ fromEnum mode)
                                              (fromIntegral offsetraw) (fromIntegral sizeraw)
             when (ptr == nullPtr) $
                   throwErrnoPath ("mmap of '" ++ filepath ++ "' failed") filepath
@@ -254,14 +252,14 @@ mmapWithFilePtr :: FilePath                        -- ^ name of file to mmap
 mmapWithFilePtr filepath mode offsetsize action = do
     checkModeRegion filepath mode offsetsize
     (ptr,rawsize,offset,size) <- mmapFilePtr filepath mode offsetsize
-    result <- action (ptr `plusPtr` offset,size) `finally` munmapFilePtr ptr rawsize
+    result <- action (ptr `plusPtr` offset,size) `E.finally` munmapFilePtr ptr rawsize
     return result
 
 -- | Maps region of file and returns it as 'ForeignPtr'. See 'mmapFilePtr' for details.
 mmapFileForeignPtr :: FilePath                     -- ^ name of file to map
                    -> Mode                         -- ^ access mode
                    -> Maybe (Int64,Int)            -- ^ range to map, maps whole file if Nothing
-                   -> IO (ForeignPtr a,Int,Int)    -- ^ foreign pointer to beginning of raw region, 
+                   -> IO (ForeignPtr a,Int,Int)    -- ^ foreign pointer to beginning of raw region,
                                                    -- offset to your data and size of your data
 mmapFileForeignPtr filepath mode range = do
     checkModeRegion filepath mode range
@@ -280,9 +278,13 @@ mmapFileByteString filepath range = do
     let bytestring = BS.fromForeignPtr foreignptr offset size
     return bytestring
 
--- | The 'mmapFileForeignPtrLazy' function maps a file or device into memory,
--- returning a list of tuples with the same meaning as in function
--- 'mmapFileForeignPtr'.
+-- | The 'mmapFileForeignPtrLazy' function maps a file or device into
+-- memory, returning a list of tuples with the same meaning as in
+-- function 'mmapFileForeignPtr'.
+--
+-- Chunks are really mapped into memory at the first inspection of a
+-- chunk. They are kept in memory while they are referenced, garbage
+-- collector takes care of the later.
 --
 mmapFileForeignPtrLazy :: FilePath                    -- ^ name of file to mmap
                        -> Mode                        -- ^ access mode
@@ -290,32 +292,40 @@ mmapFileForeignPtrLazy :: FilePath                    -- ^ name of file to mmap
                        -> IO [(ForeignPtr a,Int,Int)] -- ^ (ptr,offset,size)
 mmapFileForeignPtrLazy filepath mode offsetsize = do
     checkModeRegion filepath mode offsetsize
-    bracketOnError (mmapFileOpen filepath mode)
+    E.bracketOnError (mmapFileOpen filepath mode)
                        (finalizeForeignPtr) mmap
     where
         mmap handle = do
             (offset,size) <- sanitizeFileRegion filepath handle mode offsetsize
-            return $ map (mapChunk handle) (chunks offset size)
-        -- FIXME: might be we need NOINLINE pragma here, investigate later
-        mapChunk handle (offset,size) = unsafePerformIO $
-            withForeignPtr handle $ \handle -> do
-                let align     = offset `mod` fromIntegral c_system_io_granularity
-                    offsetraw = offset - align
-                    sizeraw   = size + fromIntegral align
-                ptr <- c_system_io_mmap_mmap handle (fromIntegral $ fromEnum mode) 
-                       (fromIntegral offsetraw) (fromIntegral sizeraw)
-                when (ptr == nullPtr) $
-                     throwErrnoPath ("lazy mmap of '" ++ filepath ++ 
-                                    "' chunk(" ++ show offset ++ "," ++ show size ++") failed") filepath
-                let rawsizeptr = castIntToPtr sizeraw
-                foreignptr <- newForeignPtrEnv c_system_io_mmap_munmap_funptr rawsizeptr ptr
-                return (foreignptr,fromIntegral offset,size)
+            return $ map (mmapFileForeignPtrLazyChunk filepath mode handle) (chunks offset size)
+
+
+{-# NOINLINE mmapFileForeignPtrLazyChunk #-}
+mmapFileForeignPtrLazyChunk :: FilePath
+                            -> Mode
+                            -> ForeignPtr ()
+                            -> (Int64, Int)
+                            -> (ForeignPtr a, Int, Int)
+mmapFileForeignPtrLazyChunk filepath mode handle' (offset,size) = unsafePerformIO $
+    withForeignPtr handle' $ \handle -> do
+        let align     = offset `mod` fromIntegral c_system_io_granularity
+            offsetraw = offset - align
+            sizeraw   = size + fromIntegral align
+        ptr <- c_system_io_mmap_mmap handle (fromIntegral $ fromEnum mode)
+                 (fromIntegral offsetraw) (fromIntegral sizeraw)
+        when (ptr == nullPtr) $
+            throwErrnoPath ("lazy mmap of '" ++ filepath ++
+                            "' chunk(" ++ show offset ++ "," ++ show size ++") failed") filepath
+        let rawsizeptr = castIntToPtr sizeraw
+        foreignptr <- newForeignPtrEnv c_system_io_mmap_munmap_funptr rawsizeptr ptr
+        return (foreignptr,fromIntegral offset,size)
 
 chunks :: Int64 -> Int64 -> [(Int64,Int)]
-chunks offset 0 = []
+chunks _offset 0 = []
 chunks offset size | size <= fromIntegral chunkSize = [(offset,fromIntegral size)]
-                   | otherwise = let offset2 = ((offset + chunkSize + chunkSize - 1) `div` chunkSize) * chunkSize
+                   | otherwise = let offset2 = ((offset + chunkSizeLong * 2 - 1) `div` chunkSizeLong) * chunkSizeLong
                                      size2   = offset2 - offset
+                                     chunkSizeLong = fromIntegral chunkSize
                                  in (offset,fromIntegral size2) : chunks offset2 (size-size2)
 
 -- | Maps region of file and returns it as 'BSL.ByteString'. File is
@@ -337,20 +347,20 @@ munmapFilePtr :: Ptr a  -- ^ pointer
               -> IO ()
 munmapFilePtr ptr rawsize = c_system_io_mmap_munmap (castIntToPtr rawsize) ptr
 
-chunkSize :: Num a => a
-chunkSize = fromIntegral $ (128*1024 `div` c_system_io_granularity) * c_system_io_granularity
+chunkSize :: Int
+chunkSize = (128*1024 `div` fromIntegral c_system_io_granularity) * fromIntegral c_system_io_granularity
 
 mmapFileOpen :: FilePath -> Mode -> IO (ForeignPtr ())
-mmapFileOpen filepath mode = do
-    ptr <- withCString filepath $ \filepath ->
+mmapFileOpen filepath' mode = do
+    ptr <- withCString filepath' $ \filepath ->
         c_system_io_mmap_file_open filepath (fromIntegral $ fromEnum mode)
     when (ptr == nullPtr) $
-        throwErrnoPath ("opening of '" ++ filepath ++ "' failed") filepath
+        throwErrnoPath ("opening of '" ++ filepath' ++ "' failed") filepath'
     handle <- newForeignPtr c_system_io_mmap_file_close ptr
     return handle
 
-castPtrToInt :: Ptr a -> Int
-castPtrToInt ptr = ptr `minusPtr` nullPtr
+--castPtrToInt :: Ptr a -> Int
+--castPtrToInt ptr = ptr `minusPtr` nullPtr
 
 castIntToPtr :: Int -> Ptr a
 castIntToPtr int = nullPtr `plusPtr` int
