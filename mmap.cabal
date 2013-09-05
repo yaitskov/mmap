@@ -1,5 +1,5 @@
 Name: mmap
-Version: 0.5.8
+Version: 0.5.9
 Stability: stable
 License: BSD3
 License-File: LICENSE
@@ -32,6 +32,7 @@ Library
   Exposed-modules: System.IO.MMap
   Hs-source-dirs: .
   Include-dirs: cbits
+  GHC-options: -Wall
   if os(mingw32)
       C-sources: cbits/win32.c
   else
